@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { BonusBuy, Stream } from '../types/database.types';
 import { getBonusesByStreamId, getStreamById } from '../services/bonusService';
@@ -9,6 +9,9 @@ import { AutoScrollList } from '../components/overlay/AutoScrollList';
 
 export const OBSOverlayPage: React.FC = () => {
   const { id: urlStreamId } = useParams<{ id: string }>();
+  const [searchParams] = useSearchParams();
+  const token = searchParams.get('token');
+
   const [streamId, setStreamId] = useState<string | null>(urlStreamId || null);
   const [stream, setStream] = useState<Stream | null>(null);
   const [bonuses, setBonuses] = useState<BonusBuy[]>([]);
@@ -50,6 +53,30 @@ export const OBSOverlayPage: React.FC = () => {
     try {
       let targetId = urlStreamId;
 
+      // Если в URL передан obs_token, ищем актуальную сессию этого конкретного пользователя
+      if (token) {
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('id')
+          .eq('obs_token', token)
+          .maybeSingle();
+
+        if (profileData) {
+          const { data: userStream } = await supabase
+            .from('streams')
+            .select('id')
+            .eq('user_id', profileData.id)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+          if (userStream) {
+            targetId = userStream.id;
+          }
+        }
+      }
+
+      // Если нет ни токена, ни параметра ID — берем последнюю общую сессию
       if (!targetId) {
         const { data: latestStream } = await supabase
           .from('streams')
@@ -77,7 +104,7 @@ export const OBSOverlayPage: React.FC = () => {
     } catch (err) {
       console.error('Error loading OBS overlay data:', err);
     }
-  }, [urlStreamId]);
+  }, [urlStreamId, token]);
 
   useEffect(() => {
     loadData();
@@ -194,9 +221,7 @@ export const OBSOverlayPage: React.FC = () => {
               {/* Векторная SVG иконка бургера */}
               <svg className="w-16 h-16 shrink-0 drop-shadow-md" viewBox="0 0 50 50">
                 <g transform="translate(25, 25)">
-                  {/* Верхняя булочка */}
                   <path d="M -18,-2 A 18 18 0 0 1 18,-2 Z" fill="#E28743" />
-                  {/* Семечки кунжута */}
                   <g fill="#FFF8E7">
                     <ellipse cx="-8" cy="-10" rx="1.3" ry="0.7" transform="rotate(45 -8 -10)" />
                     <ellipse cx="0" cy="-13" rx="1.3" ry="0.7" transform="rotate(45 0 -13)" />
@@ -204,13 +229,9 @@ export const OBSOverlayPage: React.FC = () => {
                     <ellipse cx="-4" cy="-6" rx="1.3" ry="0.7" transform="rotate(45 -4 -6)" />
                     <ellipse cx="4" cy="-5" rx="1.3" ry="0.7" transform="rotate(45 4 -5)" />
                   </g>
-                  {/* Салат */}
                   <rect x="-19" y="-2" width="38" height="4" rx="2" fill="#48BB78" />
-                  {/* Сыр */}
                   <path d="M -18,2 L 18,2 L 18,6 L 10,6 L 6,11 L 2,6 L -18,6 Z" fill="#ECC94B" />
-                  {/* Котлета */}
                   <rect x="-18" y="6" width="36" height="6" rx="3" fill="#633211" />
-                  {/* Нижняя булочка */}
                   <path d="M -17,12 L 17,12 A 3 3 0 0 1 17,17 L -17,17 A 3 3 0 0 1 -17,12 Z" fill="#C8702E" />
                 </g>
               </svg>

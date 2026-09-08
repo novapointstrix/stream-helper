@@ -1,11 +1,16 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { WheelSector } from '../types/database.types';
 import { wheelAudio } from '../utils/wheelAudio';
 
 export const OBSWheelOverlayPage: React.FC = () => {
+    const [searchParams] = useSearchParams();
+    const token = searchParams.get('token');
+
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
+    const [userId, setUserId] = useState<string | null>(null);
     const [playerName, setPlayerName] = useState('');
     const [winner, setWinner] = useState<WheelSector | null>(null);
     const [visible, setVisible] = useState(false);
@@ -13,6 +18,29 @@ export const OBSWheelOverlayPage: React.FC = () => {
 
     const lastSectorIndexRef = useRef<number>(-1);
     const hideTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+    // ---------------------------------------------------------
+    // ПОЛУЧЕНИЕ USER_ID ПО OBS_TOKEN
+    // ---------------------------------------------------------
+    useEffect(() => {
+        const fetchUserByToken = async () => {
+            if (!token) return;
+
+            const { data, error } = await supabase
+                .from('profiles')
+                .select('id')
+                .eq('obs_token', token)
+                .maybeSingle();
+
+            if (data && !error) {
+                setUserId(data.id);
+            } else {
+                console.error('Ошибка верификации OBS токена или пользователь не найден');
+            }
+        };
+
+        fetchUserByToken();
+    }, [token]);
 
     // ---------------------------------------------------------
     // ОТКЛЮЧЕНИЕ СКРОЛЛА
@@ -225,10 +253,12 @@ export const OBSWheelOverlayPage: React.FC = () => {
     };
 
     // ---------------------------------------------------------
-    // SUPABASE ПОДКЛЮЧЕНИЕ
+    // SUPABASE REALTIME ПОДКЛЮЧЕНИЕ С УЧЕТОМ USER_ID ИЛИ TOKEN
     // ---------------------------------------------------------
     useEffect(() => {
-        const channel = supabase.channel('wheel_events', {
+        const channelName = userId ? `wheel_events_${userId}` : 'wheel_events';
+
+        const channel = supabase.channel(channelName, {
             config: {
                 broadcast: { self: true },
             },
@@ -240,6 +270,10 @@ export const OBSWheelOverlayPage: React.FC = () => {
                 { event: 'START_SPIN' },
                 ({ payload }) => {
                     if (payload) {
+                        // Если передан userId в payload, фильтруем не принадлежащие события
+                        if (userId && payload.userId && payload.userId !== userId) {
+                            return;
+                        }
                         startSpinSequence(payload);
                     }
                 }
@@ -249,7 +283,7 @@ export const OBSWheelOverlayPage: React.FC = () => {
         return () => {
             supabase.removeChannel(channel);
         };
-    }, []);
+    }, [userId]);
 
     // ---------------------------------------------------------
     // ЗАПУСК И АНИМАЦИЯ
@@ -267,7 +301,6 @@ export const OBSWheelOverlayPage: React.FC = () => {
             runSpinAnimation(payload);
         }, 100);
 
-        // Показ в течение 13 сек (6 сек прокрут + 7 сек финал)
         hideTimerRef.current = setTimeout(() => {
             setVisible(false);
         }, 13000);
@@ -306,7 +339,6 @@ export const OBSWheelOverlayPage: React.FC = () => {
             const ease = 1 - Math.pow(1 - progress, 4.5);
             const currentAngle = finalAngle * ease;
 
-            // Щелчок при смене сектора
             const currentSectorIndex = Math.floor((currentAngle % (Math.PI * 2)) / arc);
             if (currentSectorIndex !== lastSectorIndexRef.current) {
                 wheelAudio.playTick();
@@ -321,14 +353,20 @@ export const OBSWheelOverlayPage: React.FC = () => {
                 const winSec =
                     activeSectors[winningIndex >= 0 ? winningIndex : 0];
                 setWinner(winSec);
-
-                // Победный звук
                 wheelAudio.playWin();
             }
         };
 
         requestAnimationFrame(animate);
     };
+
+    if (token && !userId) {
+        return (
+            <div className="fixed inset-0 flex items-center justify-center bg-transparent text-white font-mono text-xs">
+                Загрузка оверлея колеса...
+            </div>
+        );
+    }
 
     return (
         <>
@@ -373,7 +411,6 @@ export const OBSWheelOverlayPage: React.FC = () => {
                         ${visible ? 'opacity-100 scale-100' : 'opacity-0 scale-95 pointer-events-none'}
                     `}
                 >
-                    {/* Подсветка */}
                     <div
                         className="
                             absolute
@@ -386,7 +423,6 @@ export const OBSWheelOverlayPage: React.FC = () => {
                         "
                     />
 
-                    {/* Ник зрителя + стрелка */}
                     <div
                         className="
                             flex
@@ -419,7 +455,6 @@ export const OBSWheelOverlayPage: React.FC = () => {
                             </div>
                         )}
 
-                        {/* Указатель сверху */}
                         <div
                             className="
                                 relative
@@ -438,7 +473,6 @@ export const OBSWheelOverlayPage: React.FC = () => {
                         />
                     </div>
 
-                    {/* Колесо (Canvas) */}
                     <div
                         className="
                             relative
@@ -457,7 +491,6 @@ export const OBSWheelOverlayPage: React.FC = () => {
                         />
                     </div>
 
-                    {/* Блок победного приза */}
                     <div
                         className="
                             h-28
