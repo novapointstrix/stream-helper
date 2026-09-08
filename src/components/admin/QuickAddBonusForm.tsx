@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { createBonus } from '../../services/bonusService';
-import { Plus } from 'lucide-react';
+import { supabase } from '../../lib/supabaseClient';
+import { Plus, Loader2 } from 'lucide-react';
 
 interface Props {
   streamId?: string;
@@ -18,7 +18,7 @@ export const QuickAddBonusForm: React.FC<Props> = ({ streamId, onBonusAdded }) =
     if (!slotName.trim() || !buyCost) return;
 
     if (!streamId) {
-      alert('Ошибка: Не выбран ID стрима');
+      alert('Ошибка: Стрим не выбран');
       return;
     }
 
@@ -26,32 +26,45 @@ export const QuickAddBonusForm: React.FC<Props> = ({ streamId, onBonusAdded }) =
 
     try {
       const costNumber = Number(buyCost) || 0;
-      const metaValue = playerOrProvider.trim() || '';
+      const metaValue = playerOrProvider.trim() || null;
 
-      await createBonus({
-        stream_id: streamId,
-        slot_name: slotName.trim(),
-        player_name: metaValue || null,
-        provider: metaValue || '—',
-        buy_amount: costNumber,
-        buy_cost: costNumber,
-        win_amount: null,
-        multiplier: null,
-        position: 0,
-        status: 'pending',
-      });
+      // 1. Получаем текущее количество слотов у стрима для точной позиции
+      const { count } = await supabase
+        .from('bonus_buys')
+        .select('*', { count: 'exact', head: true })
+        .eq('stream_id', streamId);
+
+      const nextPosition = (count || 0) + 1;
+
+      // 2. Вставляем новый бонус
+      const { error } = await supabase.from('bonus_buys').insert([
+        {
+          stream_id: streamId,
+          slot_name: slotName.trim(),
+          player_name: metaValue,
+          provider: metaValue || '—',
+          buy_amount: costNumber,
+          buy_cost: costNumber,
+          win_amount: null,
+          multiplier: null,
+          position: nextPosition,
+          status: 'pending',
+        },
+      ]);
+
+      if (error) throw error;
 
       setSlotName('');
       setPlayerOrProvider('');
       setBuyCost('');
 
+      // 3. Сообщаем родителю об успешном добавлении
       if (onBonusAdded) {
         onBonusAdded();
       }
-    } catch (err: unknown) {
-      const error = err as Error;
-      console.error('Ошибка добавления бонуса:', error);
-      alert(`Ошибка: ${error?.message || 'Не удалось добавить слот'}`);
+    } catch (err: any) {
+      console.error('Ошибка добавления бонуса:', err);
+      alert(`Ошибка: ${err?.message || 'Не удалось добавить слот'}`);
     } finally {
       setLoading(false);
     }
@@ -60,44 +73,44 @@ export const QuickAddBonusForm: React.FC<Props> = ({ streamId, onBonusAdded }) =
   return (
     <form
       onSubmit={handleSubmit}
-      className="bg-zinc-900/80 border border-zinc-800 rounded-2xl p-4 shadow-lg space-y-3 mb-6"
+      className="bg-[#121214] border border-white/10 rounded-2xl p-4 shadow-xl space-y-3 mb-6"
     >
-      <div className="text-sm font-bold text-zinc-200">Быстрое добавление слота</div>
+      <div className="text-sm font-bold text-gray-200">Быстрое добавление слота</div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div>
-          <label className="block text-xs text-zinc-400 mb-1">Слот</label>
+          <label className="block text-xs text-gray-400 mb-1">Слот *</label>
           <input
             type="text"
             required
-            placeholder="Название слота *"
+            placeholder="Название слота"
             value={slotName}
             onChange={(e) => setSlotName(e.target.value)}
-            className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-amber-500/60"
+            className="w-full bg-black/60 border border-white/10 rounded-xl px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-yellow-500"
           />
         </div>
 
         <div>
-          <label className="block text-xs text-zinc-400 mb-1">Ник/Провайдер</label>
+          <label className="block text-xs text-gray-400 mb-1">Ник / Провайдер</label>
           <input
             type="text"
-            placeholder="Ник/Провайдер"
+            placeholder="Никнейм или провайдер"
             value={playerOrProvider}
             onChange={(e) => setPlayerOrProvider(e.target.value)}
-            className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-amber-500/60"
+            className="w-full bg-black/60 border border-white/10 rounded-xl px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-yellow-500"
           />
         </div>
 
         <div>
-          <label className="block text-xs text-zinc-400 mb-1">Покупка ($)</label>
+          <label className="block text-xs text-gray-400 mb-1">Покупка ($) *</label>
           <input
             type="number"
             step="any"
             required
-            placeholder="Цена покупки ($) *"
+            placeholder="Сумма покупки"
             value={buyCost}
             onChange={(e) => setBuyCost(e.target.value)}
-            className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-sm text-white placeholder-zinc-500 focus:outline-none focus:border-amber-500/60"
+            className="w-full bg-black/60 border border-white/10 rounded-xl px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-yellow-500"
           />
         </div>
       </div>
@@ -106,9 +119,9 @@ export const QuickAddBonusForm: React.FC<Props> = ({ streamId, onBonusAdded }) =
         <button
           type="submit"
           disabled={loading || !slotName || !buyCost}
-          className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-zinc-950 disabled:opacity-50 font-bold rounded-xl text-sm flex items-center gap-2 transition shadow-md cursor-pointer"
+          className="px-4 py-2 bg-yellow-500 hover:bg-yellow-400 text-black disabled:opacity-50 font-bold rounded-xl text-sm flex items-center gap-2 transition shadow-md cursor-pointer"
         >
-          <Plus size={16} />
+          {loading ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />}
           {loading ? 'Добавление...' : 'Добавить слот'}
         </button>
       </div>

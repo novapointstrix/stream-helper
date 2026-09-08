@@ -107,6 +107,7 @@ export const AdminDashboard: React.FC = () => {
     loadData();
   }, [loadData]);
 
+  // Realtime подписка: исправлено название таблицы с 'bonuses' на 'bonus_buys'
   useEffect(() => {
     const targetId = paramId || activeStreamId;
     if (!targetId) return;
@@ -118,7 +119,7 @@ export const AdminDashboard: React.FC = () => {
         {
           event: '*',
           schema: 'public',
-          table: 'bonuses',
+          table: 'bonus_buys',
           filter: `stream_id=eq.${targetId}`,
         },
         () => {
@@ -319,8 +320,8 @@ export const AdminDashboard: React.FC = () => {
               type="button"
               onClick={() => setShowStyleSelector(!showStyleSelector)}
               className={`text-xs font-medium px-3 py-1.5 rounded-xl flex items-center gap-1.5 border transition cursor-pointer ${showStyleSelector
-                ? 'bg-[#27272A] border-[#3F3F46] text-white'
-                : 'bg-[#18181B] border-[#27272A] text-[#A1A1AA] hover:text-white'
+                  ? 'bg-[#27272A] border-[#3F3F46] text-white'
+                  : 'bg-[#18181B] border-[#27272A] text-[#A1A1AA] hover:text-white'
                 }`}
             >
               <Palette size={13} />
@@ -394,7 +395,11 @@ export const AdminDashboard: React.FC = () => {
 
         {/* Форма быстрого добавления слота */}
         <div className="bg-[#121215] border border-[#27272A] rounded-2xl p-4">
-          <QuickAddBonusForm streamId={currentStreamId} defaultStyle={widgetStyle} onAdded={loadData} />
+          <QuickAddBonusForm
+            streamId={currentStreamId}
+            onBonusAdded={loadData}
+            onAdded={loadData}
+          />
         </div>
 
         {/* Список слотов */}

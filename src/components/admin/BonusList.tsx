@@ -13,9 +13,9 @@ export const BonusList: React.FC<Props> = ({ bonuses, onBonusUpdated }) => {
     const [editingBonus, setEditingBonus] = useState<BonusBuy | null>(null);
     const [loading, setLoading] = useState(false);
 
-    // Сортировка слотов по порядку добавления
+    // Сортировка слотов по позиции или дате
     const sortedBonuses = [...bonuses].sort((a, b) => {
-        if (a.position != null && b.position != null) {
+        if (a.position != null && b.position != null && a.position !== b.position) {
             return a.position - b.position;
         }
         const timeA = a.created_at ? new Date(a.created_at).getTime() : 0;
@@ -23,17 +23,35 @@ export const BonusList: React.FC<Props> = ({ bonuses, onBonusUpdated }) => {
         return timeA - timeB;
     });
 
+    // Удаление с перерасчетом порядковых номеров
     const handleDelete = async (id: string) => {
         if (!confirm('Вы уверены, что хотите удалить этот слот?')) return;
 
+        // 1. Удаляем запись из базы
         const { error } = await supabase.from('bonus_buys').delete().eq('id', id);
         if (error) {
             alert(`Ошибка при удалении: ${error.message}`);
-        } else if (onBonusUpdated) {
+            return;
+        }
+
+        // 2. Нормализуем позиции оставшихся слотов в БД
+        const remaining = sortedBonuses.filter((b) => b.id !== id);
+        const updatePromises = remaining.map((item, idx) =>
+            supabase
+                .from('bonus_buys')
+                .update({ position: idx + 1 })
+                .eq('id', item.id)
+        );
+
+        await Promise.all(updatePromises);
+
+        // 3. Вызываем триггер обновления стейта
+        if (onBonusUpdated) {
             onBonusUpdated();
         }
     };
 
+    // Переключение LIVE статуса
     const toggleStatus = async (bonus: BonusBuy) => {
         const isCurrentlyPlaying = bonus.status === 'playing';
         const newStatus = isCurrentlyPlaying ? 'pending' : 'playing';
@@ -60,6 +78,7 @@ export const BonusList: React.FC<Props> = ({ bonuses, onBonusUpdated }) => {
         if (onBonusUpdated) onBonusUpdated();
     };
 
+    // Сохранение изменений модалки
     const handleSaveEdit = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!editingBonus) return;
@@ -113,18 +132,20 @@ export const BonusList: React.FC<Props> = ({ bonuses, onBonusUpdated }) => {
                     {sortedBonuses.map((item, index) => {
                         const isPlaying = item.status === 'playing';
                         const cost = item.buy_amount ?? item.buy_cost ?? 0;
+
+                        // Сквозная динамическая нумерация по индексу списка (1, 2, 3...)
                         const displayIndex = String(index + 1).padStart(2, '0');
 
                         return (
                             <div
                                 key={item.id}
                                 className={`p-4 rounded-xl border flex items-center justify-between transition-all ${isPlaying
-                                    ? 'bg-yellow-950/40 border-yellow-500/80 shadow-[0_0_15px_rgba(242,248,31,0.2)]'
-                                    : 'bg-[#1a1a1e] border-white/5 hover:border-white/20'
+                                        ? 'bg-yellow-950/40 border-yellow-500/80 shadow-[0_0_15px_rgba(242,248,31,0.2)]'
+                                        : 'bg-[#1a1a1e] border-white/5 hover:border-white/20'
                                     }`}
                             >
                                 <div className="flex items-center gap-4">
-                                    <span className="font-bold font-mono text-gray-400 min-w-[36px]">
+                                    <span className="font-bold font-mono text-amber-400 min-w-[36px]">
                                         #{displayIndex}
                                     </span>
                                     <div>
@@ -162,9 +183,9 @@ export const BonusList: React.FC<Props> = ({ bonuses, onBonusUpdated }) => {
                                         <button
                                             onClick={() => toggleStatus(item)}
                                             title={isPlaying ? 'Снять статус LIVE' : 'Сделать активным (LIVE)'}
-                                            className={`p-2 rounded-lg border transition-colors ${isPlaying
-                                                ? 'bg-yellow-500 text-black border-yellow-400 font-bold'
-                                                : 'bg-gray-800 text-gray-300 border-gray-700 hover:bg-yellow-950/60 hover:text-yellow-400'
+                                            className={`p-2 rounded-lg border transition-colors cursor-pointer ${isPlaying
+                                                    ? 'bg-yellow-500 text-black border-yellow-400 font-bold'
+                                                    : 'bg-gray-800 text-gray-300 border-gray-700 hover:bg-yellow-950/60 hover:text-yellow-400'
                                                 }`}
                                         >
                                             <Play size={16} className={isPlaying ? 'fill-black' : ''} />
@@ -173,7 +194,7 @@ export const BonusList: React.FC<Props> = ({ bonuses, onBonusUpdated }) => {
                                         <button
                                             onClick={() => setEditingBonus(item)}
                                             title="Редактировать слот"
-                                            className="p-2 bg-gray-800 text-blue-400 border border-gray-700 rounded-lg hover:bg-blue-950 hover:border-blue-500 transition-colors"
+                                            className="p-2 bg-gray-800 text-blue-400 border border-gray-700 rounded-lg hover:bg-blue-950 hover:border-blue-500 transition-colors cursor-pointer"
                                         >
                                             <Edit2 size={16} />
                                         </button>
@@ -181,7 +202,7 @@ export const BonusList: React.FC<Props> = ({ bonuses, onBonusUpdated }) => {
                                         <button
                                             onClick={() => handleDelete(item.id)}
                                             title="Удалить слот"
-                                            className="p-2 bg-gray-800 text-red-400 border border-gray-700 rounded-lg hover:bg-red-950 hover:border-red-600 transition-colors"
+                                            className="p-2 bg-gray-800 text-red-400 border border-gray-700 rounded-lg hover:bg-red-950 hover:border-red-600 transition-colors cursor-pointer"
                                         >
                                             <Trash2 size={16} />
                                         </button>
@@ -282,13 +303,16 @@ export const BonusList: React.FC<Props> = ({ bonuses, onBonusUpdated }) => {
                                     type="number"
                                     step="any"
                                     value={editingBonus.buy_amount || editingBonus.buy_cost || ''}
-                                    onChange={(e) =>
+                                    onChange={(e) => {
+                                        const newCost = e.target.value === '' ? 0 : Number(e.target.value);
+                                        const win = Number(editingBonus.win_amount || 0);
                                         setEditingBonus({
                                             ...editingBonus,
-                                            buy_amount: e.target.value === '' ? 0 : Number(e.target.value),
-                                            buy_cost: e.target.value === '' ? 0 : Number(e.target.value),
-                                        })
-                                    }
+                                            buy_amount: newCost,
+                                            buy_cost: newCost,
+                                            multiplier: newCost > 0 ? win / newCost : 0,
+                                        });
+                                    }}
                                     className="w-full bg-black/60 border border-white/10 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-yellow-500"
                                 />
                             </div>
@@ -301,12 +325,15 @@ export const BonusList: React.FC<Props> = ({ bonuses, onBonusUpdated }) => {
                                     type="number"
                                     step="any"
                                     value={editingBonus.win_amount || ''}
-                                    onChange={(e) =>
+                                    onChange={(e) => {
+                                        const newWin = e.target.value === '' ? 0 : Number(e.target.value);
+                                        const cost = Number(editingBonus.buy_cost || editingBonus.buy_amount || 0);
                                         setEditingBonus({
                                             ...editingBonus,
-                                            win_amount: e.target.value === '' ? 0 : Number(e.target.value),
-                                        })
-                                    }
+                                            win_amount: newWin,
+                                            multiplier: cost > 0 ? newWin / cost : 0,
+                                        });
+                                    }}
                                     className="w-full bg-black/60 border border-white/10 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-yellow-500"
                                 />
                             </div>
@@ -331,14 +358,14 @@ export const BonusList: React.FC<Props> = ({ bonuses, onBonusUpdated }) => {
                             <button
                                 type="button"
                                 onClick={() => setEditingBonus(null)}
-                                className="px-4 py-2 bg-gray-800 text-gray-300 rounded-xl hover:bg-gray-700 transition"
+                                className="px-4 py-2 bg-gray-800 text-gray-300 rounded-xl hover:bg-gray-700 transition cursor-pointer"
                             >
                                 Отмена
                             </button>
                             <button
                                 type="submit"
                                 disabled={loading}
-                                className="px-5 py-2 bg-yellow-500 hover:bg-yellow-400 text-black font-bold rounded-xl flex items-center gap-2 transition"
+                                className="px-5 py-2 bg-yellow-500 hover:bg-yellow-400 text-black font-bold rounded-xl flex items-center gap-2 transition cursor-pointer"
                             >
                                 <Check size={18} />
                                 {loading ? 'Сохранение...' : 'Сохранить'}

@@ -308,15 +308,14 @@ export const WheelControlPage: React.FC = () => {
     };
 
     const handleLaunchWheel = async () => {
-        if (sectors.length < 2 || !activePresetId) return;
+        if (sectors.length < 2 || !activePresetId || isSpinning) return;
 
         setIsSpinning(true);
         const winningSector = getRandomWinner();
-        const durationMs = 10000;
-        const currentPlayer = playerName || 'Зритель';
+        const durationMs = 6000;
+        const currentPlayer = playerName.trim() || 'Зритель';
 
         try {
-            // Привязываем ролл к конкретному preset_id
             const { error: dbError } = await supabase
                 .from('wheel_history')
                 .insert([
@@ -347,16 +346,25 @@ export const WheelControlPage: React.FC = () => {
         };
 
         const channel = supabase.channel('wheel_events');
-        await channel.subscribe();
-        await channel.send({
-            type: 'broadcast',
-            event: 'START_SPIN',
-            payload,
+
+        // Гарантированная отправка только после установления соединения
+        channel.subscribe((status) => {
+            if (status === 'SUBSCRIBED') {
+                channel.send({
+                    type: 'broadcast',
+                    event: 'START_SPIN',
+                    payload,
+                }).then(() => {
+                    setTimeout(() => {
+                        supabase.removeChannel(channel);
+                    }, 1000);
+                });
+            }
         });
 
         setTimeout(() => {
             setIsSpinning(false);
-        }, durationMs + 4000);
+        }, durationMs + 7000);
     };
 
     const handleDeleteHistoryItem = async (id: string) => {

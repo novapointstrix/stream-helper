@@ -12,6 +12,7 @@ export const OBSWheelOverlayPage: React.FC = () => {
     const [shouldRender, setShouldRender] = useState(false);
 
     const lastSectorIndexRef = useRef<number>(-1);
+    const hideTimerRef = useRef<NodeJS.Timeout | null>(null);
 
     // ---------------------------------------------------------
     // ОТКЛЮЧЕНИЕ СКРОЛЛА
@@ -227,14 +228,20 @@ export const OBSWheelOverlayPage: React.FC = () => {
     // SUPABASE ПОДКЛЮЧЕНИЕ
     // ---------------------------------------------------------
     useEffect(() => {
-        const channel = supabase.channel('wheel_events');
+        const channel = supabase.channel('wheel_events', {
+            config: {
+                broadcast: { self: true },
+            },
+        });
 
         channel
             .on(
                 'broadcast',
                 { event: 'START_SPIN' },
                 ({ payload }) => {
-                    startSpinSequence(payload);
+                    if (payload) {
+                        startSpinSequence(payload);
+                    }
                 }
             )
             .subscribe();
@@ -248,16 +255,20 @@ export const OBSWheelOverlayPage: React.FC = () => {
     // ЗАПУСК И АНИМАЦИЯ
     // ---------------------------------------------------------
     const startSpinSequence = (payload: any) => {
-        setPlayerName(payload.playerName);
+        if (hideTimerRef.current) {
+            clearTimeout(hideTimerRef.current);
+        }
+
+        setPlayerName(payload.playerName || 'Зритель');
         setWinner(null);
         setVisible(true);
 
-        requestAnimationFrame(() => {
-            runSpinAnimation(payload);
-        });
-
-        // Продлено до 13000 мс (6 сек вращения + 7 сек показа победного приза)
         setTimeout(() => {
+            runSpinAnimation(payload);
+        }, 100);
+
+        // Показ в течение 13 сек (6 сек прокрут + 7 сек финал)
+        hideTimerRef.current = setTimeout(() => {
             setVisible(false);
         }, 13000);
     };
