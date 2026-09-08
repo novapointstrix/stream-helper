@@ -1,0 +1,119 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { WheelConfig, WheelSpinEvent } from '../types/wheel.types';
+import { WheelCanvas } from '../components/wheel/WheelCanvas';
+import { subscribeToBroadcast } from '../lib/broadcast';
+import { wheelAudio } from '../utils/wheelAudio';
+
+export const WheelOverlayPage: React.FC = () => {
+    const [visible, setVisible] = useState(false);
+    const [config, setConfig] = useState<WheelConfig | null>(null);
+    const [rotation, setRotation] = useState(0);
+    const [winner, setWinner] = useState<{ name: string; prize: string } | null>(null);
+
+    const animRef = useRef<number | null>(null);
+    const lastTickSegmentRef = useRef<number>(-1);
+
+    useEffect(() => {
+        const unsubscribe = subscribeToBroadcast('WHEEL_SPIN_EVENT', (data: WheelSpinEvent) => {
+            startSpinSequence(data);
+        });
+
+        return () => {
+            unsubscribe();
+            if (animRef.current !== null) {
+                cancelAnimationFrame(animRef.current);
+            }
+        };
+    }, []);
+
+    const startSpinSequence = (eventData: WheelSpinEvent) => {
+        if (animRef.current !== null) {
+            cancelAnimationFrame(animRef.current);
+        }
+
+        setConfig(eventData.config);
+        setWinner(null);
+        setVisible(true);
+
+        const segmentsCount = eventData.config.segments.length;
+        const segmentAngle = 360 / segmentsCount;
+        const targetSegmentCenter = eventData.winningIndex * segmentAngle + segmentAngle / 2;
+        const fullSpins = 360 * 8;
+        const finalTargetRotation = fullSpins + (360 - targetSegmentCenter);
+
+        const duration = 10000;
+        const startTime = performance.now();
+        lastTickSegmentRef.current = -1;
+
+        const animate = (now: number) => {
+            const elapsed = now - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+
+            const easeProgress = 1 - Math.pow(1 - progress, 3);
+            const currentRot = finalTargetRotation * easeProgress;
+
+            // Звук щелчка при прохождении каждого сектора
+            if (segmentsCount > 0) {
+                const currentSegment = Math.floor(currentRot / segmentAngle);
+                if (currentSegment !== lastTickSegmentRef.current) {
+                    wheelAudio.playTick();
+                    lastTickSegmentRef.current = currentSegment;
+                }
+            }
+
+            setRotation(currentRot);
+
+            if (progress < 1) {
+                animRef.current = requestAnimationFrame(animate);
+            } else {
+                setWinner({ name: eventData.winnerName, prize: eventData.prizeLabel });
+
+                // Звук победных фанфар
+                wheelAudio.playWin();
+
+                setTimeout(() => {
+                    setVisible(false);
+                }, 3500);
+            }
+        };
+
+        animRef.current = requestAnimationFrame(animate);
+    };
+
+    if (!visible || !config) return null;
+
+    return (
+        <div className="fixed inset-0 bg-transparent flex flex-col items-center justify-center overflow-hidden select-none">
+            <div
+                className="flex flex-col items-center transition-all duration-700 transform"
+                style={{
+                    opacity: visible ? 1 : 0,
+                    transform: visible ? 'scale(1)' : 'scale(0.85)'
+                }}
+            >
+                {/* Центрированный контейнер колеса с иконкой */}
+                <div className="relative flex items-center justify-center">
+                    <WheelCanvas config={config} rotation={rotation} size={500} />
+
+                    {/* Иконка бургера по центру */}
+                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-30 pointer-events-none flex items-center justify-center">
+                        <img
+                            src="/icons/burger.png"
+                            alt="Burger"
+                            className="w-20 h-20 object-contain drop-shadow-xl"
+                        />
+                    </div>
+                </div>
+
+                {/* Полностью статичная плашка без анимаций и миганий */}
+                {winner && (
+                    <div className="mt-8 text-center bg-gray-900/90 border border-indigo-500/50 p-6 rounded-2xl shadow-2xl backdrop-blur-md">
+                        <div className="text-sm font-medium text-indigo-400 tracking-widest uppercase select-none">ПОЗДРАВЛЯЕМ!</div>
+                        <div className="text-2xl font-black text-white my-1 select-none">{winner.name}</div>
+                        <div className="text-xl font-extrabold text-amber-400 select-none">{winner.prize}</div>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+};

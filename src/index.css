@@ -1,0 +1,53 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+
+
+@layer base {
+  html {
+    height: 100%;
+    overflow-y: scroll !important;
+    /* Гарантирует появление системной полосы прокрутки */
+  }
+
+  body {
+    min-height: 100%;
+    margin: 0;
+    padding: 0;
+    background-color: #0A0A0C;
+    color: #ffffff;
+    overflow-y: visible !important;
+    /* Позволяет содержимому страницы свободно растягиваться вниз */
+  }
+
+  #root {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Для страниц оверлеев OBS оставляем прозрачный фон через класс */
+  body.obs-overlay {
+    background-color: transparent !important;
+  }
+
+  /* Сброс выделения текста при кликах модератора */
+  button,
+  a {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+}
+
+/* Кастомные утилиты */
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
