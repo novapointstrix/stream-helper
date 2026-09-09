@@ -10,6 +10,7 @@ import { MainPage } from './pages/MainPage';
 import { WheelControlPage } from './pages/WheelControlPage';
 import { OBSOverlayPage } from './pages/OBSOverlayPage';
 import { OBSWheelOverlayPage } from './pages/OBSWheelOverlayPage';
+import { ChatRollPage } from './pages/ChatRollPage';
 
 export const App: React.FC = () => {
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
@@ -151,6 +152,7 @@ export const App: React.FC = () => {
       <Route path="/dashboard" element={<ProtectedLayout><AdminDashboard /></ProtectedLayout>} />
       <Route path="/dashboard/:id" element={<ProtectedLayout><AdminDashboard /></ProtectedLayout>} />
       <Route path="/wheel" element={<ProtectedLayout><WheelControlPage /></ProtectedLayout>} />
+      <Route path="/chat-roll" element={<ProtectedLayout><ChatRollPage onBack={() => window.history.back()} /></ProtectedLayout>} />
 
       {/* Редирект с некорректных адресов */}
       <Route path="*" element={<Navigate to="/" replace />} />

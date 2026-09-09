@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabaseClient';
-import { Lock, Mail, AlertCircle, X } from 'lucide-react';
+import { Lock, AtSign, AlertCircle, X } from 'lucide-react';
 
 interface AdminLoginModalProps {
     isOpen: boolean;
@@ -15,7 +15,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
     onSuccess,
 }) => {
     const navigate = useNavigate();
-    const [email, setEmail] = useState('');
+    const [telegramUsername, setTelegramUsername] = useState('');
     const [password, setPassword] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -27,10 +27,18 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
         setLoading(true);
         setError(null);
 
+        // Очищаем введенный ник от лишних символов и пробелов
+        const cleanUsername = telegramUsername.trim().replace(/^@/, '').toLowerCase();
+
+        // Поддерживаем как полный email, так и ввод одного лишь ника Telegram
+        const authEmail = cleanUsername.includes('@')
+            ? cleanUsername
+            : `${cleanUsername}@telegram.user`;
+
         try {
             // Прямой вход через сервисы Supabase Auth
             const { data, error: authError } = await supabase.auth.signInWithPassword({
-                email: email.trim(),
+                email: authEmail,
                 password: password,
             });
 
@@ -66,8 +74,8 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
                         <Lock size={20} />
                     </div>
                     <div>
-                        <h2 className="text-lg font-bold text-white">Вход в админ-панель</h2>
-                        <p className="text-xs text-zinc-400">Введите данные администратора из Supabase</p>
+                        <h2 className="text-lg font-bold text-white">Авторизация</h2>
+                        <p className="text-xs text-zinc-400">Введите логин и пароль</p>
                     </div>
                 </div>
 
@@ -80,15 +88,15 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
 
                 <form onSubmit={handleSubmit} className="space-y-4">
                     <div>
-                        <label className="block text-xs font-medium text-zinc-400 mb-1.5">Email</label>
+                        <label className="block text-xs font-medium text-zinc-400 mb-1.5">Ник Telegram</label>
                         <div className="relative">
-                            <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500" size={18} />
+                            <AtSign className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500" size={18} />
                             <input
-                                type="email"
+                                type="text"
                                 required
-                                value={email}
-                                onChange={(e) => setEmail(e.target.value)}
-                                placeholder="admin@domain.com"
+                                value={telegramUsername}
+                                onChange={(e) => setTelegramUsername(e.target.value)}
+                                placeholder="username"
                                 className="w-full bg-[#0A0A0C] border border-[#1F1F24] focus:border-amber-500 rounded-xl py-2.5 pl-10 pr-4 text-sm text-white placeholder-zinc-600 outline-none transition"
                             />
                         </div>

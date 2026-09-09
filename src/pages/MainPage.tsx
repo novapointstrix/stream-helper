@@ -4,6 +4,7 @@ import { Stream } from '../types/database.types';
 import { getStreams, createStream, deleteStream } from '../services/bonusService';
 import { supabase } from '../lib/supabaseClient';
 import { LOGO_OPTIONS } from '../components/StreamIconRenderer';
+import { ChatRollCard } from '../components/chat-roll/ChatRollCard';
 import {
   Plus, Trash2, ArrowRight, ChevronDown, ChevronUp, Gift, Disc
 } from 'lucide-react';
@@ -318,6 +319,12 @@ export const MainPage: React.FC = () => {
             ПЕРЕЙТИ К КОЛЕСУ <ArrowRight size={16} />
           </button>
         </section>
+
+        {/* Блок Chat Roll */}
+        <section>
+          <ChatRollCard onOpen={() => navigate('/chat-roll')} />
+        </section>
+
       </div>
     </div>
   );
