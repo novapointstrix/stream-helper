@@ -344,8 +344,8 @@ export const AdminDashboard: React.FC = () => {
               type="button"
               onClick={() => setShowStyleSelector(!showStyleSelector)}
               className={`text-xs font-medium px-3 py-1.5 rounded-xl flex items-center gap-1.5 border transition cursor-pointer ${showStyleSelector
-                  ? 'bg-[#27272A] border-[#3F3F46] text-white'
-                  : 'bg-[#18181B] border-[#27272A] text-[#A1A1AA] hover:text-white'
+                ? 'bg-[#27272A] border-[#3F3F46] text-white'
+                : 'bg-[#18181B] border-[#27272A] text-[#A1A1AA] hover:text-white'
                 }`}
             >
               <Palette size={13} />
