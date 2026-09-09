@@ -2,36 +2,35 @@ import React from 'react';
 import { ThemeId, WidgetThemeTokens } from '../types/theme';
 import { WIDGET_THEMES } from '../constants/themes';
 
-// Реэкспортируем WIDGET_THEMES, чтобы убрать ошибки импорта в компонентах
 export { WIDGET_THEMES };
 
 export function getMergedTokens(
-    styleId: ThemeId = 'classic',
+    styleId: ThemeId = 'main',
     customTokens?: Partial<WidgetThemeTokens>
 ): WidgetThemeTokens {
-    const baseTokens = WIDGET_THEMES[styleId]?.tokens || WIDGET_THEMES.classic.tokens;
+    const baseTokens = WIDGET_THEMES[styleId]?.tokens || WIDGET_THEMES.main.tokens;
     return { ...baseTokens, ...customTokens };
 }
 
 export function getThemeCssVariables(
-    styleId: ThemeId = 'classic',
+    styleId: ThemeId = 'main',
     customTokens?: Partial<WidgetThemeTokens>
 ): React.CSSProperties {
     const tokens = getMergedTokens(styleId, customTokens);
 
     return {
-        '--widget-bg': tokens.bg,
-        '--widget-surface': tokens.surface,
-        '--widget-surface-secondary': tokens.surfaceSecondary,
-        '--widget-border': tokens.border,
-        '--widget-accent': tokens.accent,
-        '--widget-accent-secondary': tokens.accentSecondary,
-        '--widget-positive': tokens.positive,
-        '--widget-warning': tokens.warning,
-        '--widget-negative': tokens.danger,
-        '--widget-text-primary': tokens.textPrimary,
-        '--widget-text-secondary': tokens.textSecondary,
-        '--widget-text-muted': tokens.textMuted,
-        '--widget-glow': tokens.glow,
+        '--widget-bg': tokens.bg || '#0A0A0C',
+        '--widget-surface': tokens.surface || '#121215',
+        '--widget-surface-secondary': tokens.surfaceSecondary || '#18181C',
+        '--widget-border': tokens.border || '#1F1F24',
+        '--widget-accent': tokens.accent || '#F59E0B',
+        '--widget-accent-secondary': tokens.accentSecondary || '#D97706',
+        '--widget-positive': tokens.positive || '#10B981',
+        '--widget-warning': tokens.warning || '#F59E0B',
+        '--widget-negative': tokens.danger || '#EF4444',
+        '--widget-text-primary': tokens.textPrimary || '#FFFFFF',
+        '--widget-text-secondary': tokens.textSecondary || '#9CA3AF',
+        '--widget-text-muted': tokens.textMuted || '#6B7280',
+        '--widget-glow': tokens.glow || 'rgba(245, 158, 11, 0.25)',
     } as React.CSSProperties;
 }

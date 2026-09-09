@@ -16,7 +16,8 @@ interface WidgetStyleSelectorProps {
 }
 
 export const WidgetStyleSelector: React.FC<WidgetStyleSelectorProps> = ({
-    selectedStyle,
+    selectedStyle = 'main',
+    customTokens,
     onChangeStyle,
     onSave,
     onClose,
@@ -41,7 +42,7 @@ export const WidgetStyleSelector: React.FC<WidgetStyleSelectorProps> = ({
         }
     };
 
-    const previewVariables = getThemeCssVariables(selectedStyle);
+    const previewVariables = getThemeCssVariables(selectedStyle, customTokens);
 
     return (
         <div className="bg-[#121215] border border-[#1F1F24] rounded-2xl p-6 shadow-2xl space-y-6 relative">
@@ -73,7 +74,11 @@ export const WidgetStyleSelector: React.FC<WidgetStyleSelectorProps> = ({
                     disabled={isSaving}
                     className="bg-amber-500 hover:bg-amber-600 active:bg-amber-700 disabled:opacity-50 text-black font-extrabold px-5 py-2.5 rounded-xl shadow-[0_0_15px_rgba(245,158,11,0.25)] transition flex items-center justify-center gap-2 cursor-pointer self-start sm:self-auto text-xs uppercase tracking-wider"
                 >
-                    {saveSuccess ? <Check size={18} /> : <Save size={18} className="fill-black" />}
+                    {saveSuccess ? (
+                        <Check size={16} strokeWidth={2.5} />
+                    ) : (
+                        <Save size={16} strokeWidth={2} />
+                    )}
                     {isSaving ? 'Сохранение...' : saveSuccess ? 'Сохранено!' : 'Сохранить стиль'}
                 </button>
             </div>
@@ -84,26 +89,26 @@ export const WidgetStyleSelector: React.FC<WidgetStyleSelectorProps> = ({
                     {Object.entries(WIDGET_THEMES).map(([id, theme]) => {
                         const themeId = id as ThemeId;
                         const isSelected = selectedStyle === themeId;
-                        const themeVars = getThemeCssVariables(themeId);
+                        const themeVars = getThemeCssVariables(themeId, isSelected ? customTokens : undefined);
 
                         return (
                             <div
                                 key={id}
                                 onClick={() => onChangeStyle(themeId)}
                                 className={`relative p-4 rounded-xl border transition cursor-pointer flex flex-col justify-between min-h-[90px] ${isSelected
-                                    ? 'border-amber-500 bg-[#18181C] shadow-[0_0_15px_rgba(245,158,11,0.15)]'
-                                    : 'border-[#1F1F24] bg-[#0A0A0C] hover:border-[#2A2A32] hover:bg-[#121215]'
+                                        ? 'border-amber-500 bg-[#18181C] shadow-[0_0_15px_rgba(245,158,11,0.15)]'
+                                        : 'border-[#1F1F24] bg-[#0A0A0C] hover:border-[#2A2A32] hover:bg-[#121215]'
                                     }`}
                             >
                                 <div className="flex items-center justify-between mb-2">
                                     <div className="flex items-center gap-1.5">
                                         <span
                                             className="w-3.5 h-3.5 rounded-full border border-black/30"
-                                            style={{ backgroundColor: (themeVars as any)['--widget-accent'] }}
+                                            style={{ backgroundColor: (themeVars as any)['--widget-accent'] || '#F59E0B' }}
                                         />
                                         <span
                                             className="w-3.5 h-3.5 rounded-full border border-black/30"
-                                            style={{ backgroundColor: (themeVars as any)['--widget-positive'] }}
+                                            style={{ backgroundColor: (themeVars as any)['--widget-positive'] || '#10B981' }}
                                         />
                                     </div>
 
@@ -115,9 +120,16 @@ export const WidgetStyleSelector: React.FC<WidgetStyleSelectorProps> = ({
                                 </div>
 
                                 <div>
-                                    <div className="font-bold text-white text-sm">{theme.name}</div>
+                                    <div className="font-bold text-white text-sm flex items-center gap-1.5">
+                                        {theme.name}
+                                        {themeId === 'main' && (
+                                            <span className="text-[9px] bg-amber-500/20 text-amber-400 border border-amber-500/30 px-1.5 py-0.2 rounded font-mono uppercase">
+                                                Default
+                                            </span>
+                                        )}
+                                    </div>
                                     <div className="text-xs text-zinc-400 mt-0.5 line-clamp-1">
-                                        {theme.description || 'Визуальная тема оверлея'}
+                                        {(theme as any).description || 'Основной стиль панели управления'}
                                     </div>
                                 </div>
                             </div>
@@ -135,7 +147,7 @@ export const WidgetStyleSelector: React.FC<WidgetStyleSelectorProps> = ({
                             </span>
                         </div>
                         <span className="text-xs text-zinc-400 font-mono">
-                            Theme: <span className="text-amber-400 font-semibold">{WIDGET_THEMES[selectedStyle]?.name}</span>
+                            Theme: <span className="text-amber-400 font-semibold">{WIDGET_THEMES[selectedStyle]?.name || 'Main'}</span>
                         </span>
                     </div>
 
@@ -143,7 +155,7 @@ export const WidgetStyleSelector: React.FC<WidgetStyleSelectorProps> = ({
                         style={previewVariables}
                         className="flex flex-col gap-2.5 p-3 rounded-xl bg-[var(--widget-bg,#0a0a0f)] border border-[var(--widget-border,#222)]"
                     >
-                        <div className="flex items-center justify-between p-3 rounded-xl bg-[var(--widget-surface,#12121a)] border border-[var(--widget-accent,#8b5cf6)] shadow-[0_0_12px_var(--widget-glow,rgba(139,92,246,0.2))]">
+                        <div className="flex items-center justify-between p-3 rounded-xl bg-[var(--widget-surface,#12121a)] border border-[var(--widget-accent,#f59e0b)] shadow-[0_0_12px_var(--widget-glow,rgba(245,158,11,0.2))]">
                             <div className="flex items-center gap-2.5">
                                 <span className="text-xs font-bold text-[var(--widget-text-muted,#888)] font-mono">#01</span>
                                 <div>
@@ -153,7 +165,7 @@ export const WidgetStyleSelector: React.FC<WidgetStyleSelectorProps> = ({
                                     <div className="text-[10px] text-[var(--widget-text-secondary,#aaa)]">$10,000</div>
                                 </div>
                             </div>
-                            <span className="px-2.5 py-1 rounded-lg text-[10px] font-bold tracking-wider uppercase bg-[var(--widget-accent,#8b5cf6)] text-white">
+                            <span className="px-2.5 py-1 rounded-lg text-[10px] font-bold tracking-wider uppercase bg-[var(--widget-accent,#f59e0b)] text-black">
                                 ОТКРЫВАЕМ
                             </span>
                         </div>
