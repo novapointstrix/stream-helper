@@ -1,7 +1,7 @@
 export interface WheelSegment {
     id: string;
     label: string;
-    weight: number; // Вес (шанс) в %
+    weight: number;
     color: string;
     textColor?: string;
 }
@@ -24,13 +24,13 @@ export interface WheelSpinEvent {
     timestamp: number;
 }
 
-// Ниже добавлены типы для работы с историей прокрутов и секторов колеса
-
 export interface WheelSector {
     id: string;
     label: string;
-    color?: string;
+    color: string;
+    chance: number;
     weight?: number;
+    user_id?: string;
 }
 
 export interface SpinRecord {
@@ -39,4 +39,6 @@ export interface SpinRecord {
     player_name: string;
     prize_label: string;
     sector_chance?: number | null;
+    user_id?: string;
+    preset_id?: string;
 }

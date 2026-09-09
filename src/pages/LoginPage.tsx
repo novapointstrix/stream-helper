@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
 
-// Инициализация Supabase клиента для браузера
-// (Используем Publishable / Anon ключ, НЕ Service Role!)
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://nzczjdlwalgzbyklwmmi.supabase.co';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'ВАШ_PUBLISHABLE_КЛЮЧ';
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
+
+if (!supabaseUrl || !supabaseAnonKey) {
+    console.error('Критика: Не заданы переменные NEXT_PUBLIC_SUPABASE_URL или NEXT_PUBLIC_SUPABASE_ANON_KEY!');
+}
 
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
@@ -19,7 +21,6 @@ export default function LoginPage() {
         setLoading(true);
         setErrorMsg(null);
 
-        // Авторизация пользователя через Supabase Auth
         const { data, error } = await supabase.auth.signInWithPassword({
             email: email.trim(),
             password: password,
@@ -33,7 +34,6 @@ export default function LoginPage() {
         }
 
         if (data.user) {
-            // Перенаправление в закрытую часть приложения после успешного входа
             window.location.href = '/dashboard';
         }
     };
@@ -77,7 +77,6 @@ export default function LoginPage() {
     );
 }
 
-// Базовые стили для быстрого старта
 const styles: { [key: string]: React.CSSProperties } = {
     container: {
         display: 'flex',

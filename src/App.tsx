@@ -3,10 +3,10 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { supabase } from './lib/supabaseClient';
 import { AdminLoginModal } from './components/common/AdminLoginModal';
 import { Navbar } from './components/common/Navbar';
-import { Lock } from 'lucide-react';
+import { Lock, Send } from 'lucide-react';
 
 import { AdminDashboard } from './pages/AdminDashboard';
-import { HistoryPage } from './pages/HistoryPage';
+import { MainPage } from './pages/MainPage';
 import { WheelControlPage } from './pages/WheelControlPage';
 import { OBSOverlayPage } from './pages/OBSOverlayPage';
 import { OBSWheelOverlayPage } from './pages/OBSWheelOverlayPage';
@@ -82,12 +82,28 @@ export const App: React.FC = () => {
                 Для работы с панелью управления авторизуйтесь как администратор.
               </p>
             </div>
-            <button
-              onClick={() => setLoginModalOpen(true)}
-              className="w-full bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-black font-extrabold py-3 rounded-xl text-xs uppercase tracking-wider transition cursor-pointer shadow-lg shadow-amber-500/20"
-            >
-              Войти в аккаунт
-            </button>
+
+            <div className="space-y-3 pt-1">
+              <button
+                onClick={() => setLoginModalOpen(true)}
+                className="w-full bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-black font-extrabold py-3 rounded-xl text-xs uppercase tracking-wider transition cursor-pointer shadow-lg shadow-amber-500/20"
+              >
+                Войти в аккаунт
+              </button>
+
+              <div className="pt-2 text-xs text-zinc-400 flex flex-wrap items-center justify-center gap-1.5 leading-snug">
+                <span>Помощь и регистрация аккаунта:</span>
+                <a
+                  href="https://t.me/jirni_otec"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 font-bold text-amber-500 hover:text-amber-400 transition"
+                >
+                  <Send size={12} className="shrink-0" />
+                  <span>@jirni_otec</span>
+                </a>
+              </div>
+            </div>
           </div>
 
           <AdminLoginModal
@@ -129,8 +145,9 @@ export const App: React.FC = () => {
       <Route path="/obs/wheel/:id" element={<OBSWheelOverlayPage />} />
 
       {/* 🔒 ЗАЩИЩЕННЫЕ МАРШРУТЫ АДМИНКИ */}
-      <Route path="/" element={<ProtectedLayout><HistoryPage /></ProtectedLayout>} />
-      <Route path="/history" element={<ProtectedLayout><HistoryPage /></ProtectedLayout>} />
+      <Route path="/" element={<ProtectedLayout><MainPage /></ProtectedLayout>} />
+      <Route path="/main" element={<ProtectedLayout><MainPage /></ProtectedLayout>} />
+      <Route path="/history" element={<ProtectedLayout><MainPage /></ProtectedLayout>} />
       <Route path="/dashboard" element={<ProtectedLayout><AdminDashboard /></ProtectedLayout>} />
       <Route path="/dashboard/:id" element={<ProtectedLayout><AdminDashboard /></ProtectedLayout>} />
       <Route path="/wheel" element={<ProtectedLayout><WheelControlPage /></ProtectedLayout>} />

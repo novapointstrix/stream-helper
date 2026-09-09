@@ -25,6 +25,9 @@ export const AdminDashboard: React.FC = () => {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [titleInput, setTitleInput] = useState('');
 
+  const [isEditingBalance, setIsEditingBalance] = useState(false);
+  const [startBalanceInput, setStartBalanceInput] = useState<number>(0);
+
   const [widgetStyle, setWidgetStyle] = useState<ThemeId>('classic');
   const [customTokens, setCustomTokens] = useState<Partial<WidgetThemeTokens> | undefined>();
   const [showStyleSelector, setShowStyleSelector] = useState(false);
@@ -32,9 +35,13 @@ export const AdminDashboard: React.FC = () => {
 
   const fetchOrCreateActiveStream = async (): Promise<string | null> => {
     try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return null;
+
       const { data: latestStream, error } = await supabase
         .from('streams')
         .select('*')
+        .eq('user_id', user.id)
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -49,7 +56,7 @@ export const AdminDashboard: React.FC = () => {
 
       const { data: newStream, error: createError } = await supabase
         .from('streams')
-        .insert([{ title: 'Новый Bonus Buy', stream_number: 1 }])
+        .insert([{ title: 'Новый Bonus Buy', stream_number: 1, user_id: user.id, start_balance: 0 }])
         .select()
         .single();
 
@@ -86,12 +93,13 @@ export const AdminDashboard: React.FC = () => {
 
       setStream(fetchedStream);
       setTitleInput(fetchedStream.title);
+      setStartBalanceInput(fetchedStream.start_balance || 0);
 
       if (fetchedStream.widget_style) {
         setWidgetStyle(fetchedStream.widget_style as ThemeId);
       }
       if (fetchedStream.custom_tokens) {
-        setCustomTokens(fetchedStream.custom_tokens);
+        setCustomTokens(fetchedStream.custom_tokens as Partial<WidgetThemeTokens>);
       }
 
       const fetchedBonuses = await getBonusesByStreamId(targetId);
@@ -107,7 +115,6 @@ export const AdminDashboard: React.FC = () => {
     loadData();
   }, [loadData]);
 
-  // Realtime подписка: исправлено название таблицы с 'bonuses' на 'bonus_buys'
   useEffect(() => {
     const targetId = paramId || activeStreamId;
     if (!targetId) return;
@@ -139,10 +146,13 @@ export const AdminDashboard: React.FC = () => {
     if (e) e.preventDefault();
     try {
       setLoading(true);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
       const nextNumber = stream ? (stream.stream_number || 0) + 1 : 1;
       const { data: newStream, error } = await supabase
         .from('streams')
-        .insert([{ title: `Bonus Buy #${nextNumber}`, stream_number: nextNumber }])
+        .insert([{ title: `Bonus Buy #${nextNumber}`, stream_number: nextNumber, user_id: user.id, start_balance: 0 }])
         .select()
         .single();
 
@@ -172,6 +182,18 @@ export const AdminDashboard: React.FC = () => {
     }
   };
 
+  const handleSaveStartBalance = async () => {
+    const currentId = activeStreamId || paramId;
+    if (!currentId) return;
+    try {
+      await updateStream(currentId, { start_balance: startBalanceInput });
+      setStream((prev) => (prev ? { ...prev, start_balance: startBalanceInput } : null));
+      setIsEditingBalance(false);
+    } catch (err) {
+      console.error('Ошибка сохранения начального баланса:', err);
+    }
+  };
+
   const handleStyleChange = (newStyle: ThemeId) => {
     setWidgetStyle(newStyle);
   };
@@ -197,7 +219,7 @@ export const AdminDashboard: React.FC = () => {
   const handleLogout = async () => {
     try {
       await supabase.auth.signOut();
-      window.location.href = '/';
+      window.location.href = '/login';
     } catch (err) {
       console.error('Ошибка выхода:', err);
     }
@@ -213,9 +235,12 @@ export const AdminDashboard: React.FC = () => {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const startBalance = Number(stream?.start_balance || 0);
   const totalSpent = bonuses.reduce((acc, b) => acc + (Number(b.buy_cost ?? b.buy_amount) || 0), 0);
   const totalWon = bonuses.reduce((acc, b) => acc + (Number(b.win_amount) || 0), 0);
   const profit = totalWon - totalSpent;
+  const currentBalance = startBalance + profit;
+
   const avgX =
     bonuses.length > 0
       ? (bonuses.reduce((acc, b) => acc + (Number(b.multiplier) || 0), 0) / bonuses.length).toFixed(1)
@@ -262,14 +287,13 @@ export const AdminDashboard: React.FC = () => {
     <div className="min-h-screen w-full bg-[#09090B] text-[#E4E4E7] font-sans relative">
       <div className="max-w-7xl mx-auto p-4 sm:p-6 space-y-5 pb-24">
 
-        {/* Шапка управления */}
         <div className="flex flex-wrap items-center justify-between gap-3 bg-[#121215] border border-[#27272A] rounded-2xl p-4 shadow-xl">
           <div className="flex items-center gap-3">
             <button
               type="button"
-              onClick={() => setTimeout(() => navigate('/history'), 0)}
+              onClick={() => setTimeout(() => navigate('/'), 0)}
               className="p-2 bg-[#18181B] border border-[#27272A] rounded-xl text-[#A1A1AA] hover:text-white transition cursor-pointer"
-              title="К истории"
+              title="На главную"
             >
               <ArrowLeft size={16} />
             </button>
@@ -356,7 +380,6 @@ export const AdminDashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* Выбор стиля виджета */}
         {showStyleSelector && (
           <div className="bg-[#121215] border border-[#27272A] rounded-2xl p-4 shadow-xl">
             <WidgetStyleSelector
@@ -371,29 +394,56 @@ export const AdminDashboard: React.FC = () => {
           </div>
         )}
 
-        {/* Статистические показатели */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
           <div className="bg-[#121215] border border-[#27272A] p-3.5 rounded-2xl">
-            <div className="text-[10px] text-[#71717A] font-mono uppercase tracking-wider">Всего бонусов</div>
-            <div className="text-lg font-semibold text-white mt-0.5">{bonuses.length}</div>
+            <div className="flex items-center justify-between text-[10px] text-[#71717A] font-mono uppercase tracking-wider">
+              <span>Старт Баланс</span>
+              <button onClick={() => setIsEditingBalance(true)} className="hover:text-white transition cursor-pointer">
+                <Edit2 size={10} />
+              </button>
+            </div>
+            {isEditingBalance ? (
+              <div className="flex items-center gap-1 mt-0.5">
+                <input
+                  type="number"
+                  value={startBalanceInput}
+                  onChange={(e) => setStartBalanceInput(Number(e.target.value))}
+                  className="w-full bg-[#09090B] border border-[#3F3F46] rounded-md px-1.5 py-0.5 text-xs text-white"
+                />
+                <button onClick={handleSaveStartBalance} className="p-1 bg-[#27272A] text-white rounded-md">
+                  <Check size={12} />
+                </button>
+              </div>
+            ) : (
+              <div className="text-lg font-semibold text-white mt-0.5">${startBalance.toLocaleString()}</div>
+            )}
           </div>
+
+          <div className="bg-[#121215] border border-[#27272A] p-3.5 rounded-2xl">
+            <div className="text-[10px] text-[#71717A] font-mono uppercase tracking-wider">Текущий Баланс</div>
+            <div className={`text-lg font-semibold mt-0.5 ${currentBalance >= startBalance ? 'text-emerald-400' : 'text-rose-400'}`}>
+              ${currentBalance.toLocaleString()}
+            </div>
+          </div>
+
           <div className="bg-[#121215] border border-[#27272A] p-3.5 rounded-2xl">
             <div className="text-[10px] text-[#71717A] font-mono uppercase tracking-wider">Затрачено</div>
             <div className="text-lg font-semibold text-[#E4E4E7] mt-0.5">${totalSpent.toLocaleString()}</div>
           </div>
+
           <div className="bg-[#121215] border border-[#27272A] p-3.5 rounded-2xl">
             <div className="text-[10px] text-[#71717A] font-mono uppercase tracking-wider">Профит</div>
-            <div className={`text-lg font-semibold mt-0.5 ${profit >= 0 ? 'text-emerald-400' : 'text-[#A1A1AA]'}`}>
+            <div className={`text-lg font-semibold mt-0.5 ${profit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
               ${profit.toLocaleString()}
             </div>
           </div>
+
           <div className="bg-[#121215] border border-[#27272A] p-3.5 rounded-2xl">
             <div className="text-[10px] text-[#71717A] font-mono uppercase tracking-wider">Средний X</div>
             <div className="text-lg font-semibold text-white mt-0.5">{avgX}x</div>
           </div>
         </div>
 
-        {/* Форма быстрого добавления слота */}
         <div className="bg-[#121215] border border-[#27272A] rounded-2xl p-4">
           <QuickAddBonusForm
             streamId={currentStreamId}
@@ -402,7 +452,6 @@ export const AdminDashboard: React.FC = () => {
           />
         </div>
 
-        {/* Список слотов */}
         <div className="bg-[#121215] border border-[#27272A] rounded-2xl p-4">
           <BonusList bonuses={formattedBonuses} onBonusUpdated={loadData} />
         </div>

@@ -2,18 +2,47 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Stream } from '../types/database.types';
 import { getStreams, createStream, deleteStream } from '../services/bonusService';
-import { WheelHistory } from '../components/wheel/WheelHistory';
-import { Plus, Trash2, ArrowRight, Tv, Disc, History } from 'lucide-react';
+import { supabase } from '../lib/supabaseClient';
+import { LOGO_OPTIONS } from '../components/StreamIconRenderer';
+import {
+  Plus, Trash2, ArrowRight, ChevronDown, ChevronUp, Gift, Disc
+} from 'lucide-react';
 
-export const HistoryPage: React.FC = () => {
+export const MainPage: React.FC = () => {
   const navigate = useNavigate();
   const [streams, setStreams] = useState<Stream[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Состояния для создания стрима
   const [streamNumber, setStreamNumber] = useState<number>(1);
   const [title, setTitle] = useState('');
+  const [startBalance, setStartBalance] = useState<number>(0);
   const [creating, setCreating] = useState(false);
+
+  const [showAllStreams, setShowAllStreams] = useState(false);
+
+  // Кастомизация иконки стрима из БД (только чтение)
+  const [selectedLogoId, setSelectedLogoId] = useState<string>('tv');
+
+  const loadProfileIcon = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data } = await supabase
+        .from('profiles')
+        .select('stream_icon')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      if (data?.stream_icon) {
+        setSelectedLogoId(data.stream_icon);
+      }
+    } catch (err) {
+      console.error('Ошибка загрузки иконки профиля:', err);
+    }
+  };
+
+  const currentLogoObj = LOGO_OPTIONS.find((opt) => opt.id === selectedLogoId) || LOGO_OPTIONS[0];
 
   const loadStreams = async () => {
     try {
@@ -37,6 +66,7 @@ export const HistoryPage: React.FC = () => {
 
   useEffect(() => {
     loadStreams();
+    loadProfileIcon();
   }, []);
 
   const handleCreate = async (e: React.FormEvent) => {
@@ -45,11 +75,11 @@ export const HistoryPage: React.FC = () => {
 
     try {
       setCreating(true);
-      const newStream = await createStream(title.trim(), streamNumber);
+      const newStream = await createStream(title.trim(), streamNumber, startBalance);
       setTitle('');
+      setStartBalance(0);
 
       if (newStream && newStream.id) {
-        // Безопасная асинхронная навигация на dashboard
         setTimeout(() => {
           navigate(`/dashboard/${newStream.id}`);
         }, 0);
@@ -85,20 +115,27 @@ export const HistoryPage: React.FC = () => {
     }, 0);
   };
 
+  const latestStream = streams.length > 0 ? streams[0] : null;
+  const olderStreams = streams.length > 1 ? streams.slice(1) : [];
+
   return (
     <div className="min-h-screen bg-[#09090B] text-[#E4E4E7] font-sans p-4 sm:p-8">
       <div className="max-w-3xl mx-auto space-y-6">
 
-        {/* БЛОК 1: Bonus Buy Panel */}
+        {/* Блок Bonus Buy */}
         <section className="bg-[#121215] border border-[#27272A] rounded-2xl p-5 shadow-xl space-y-6">
-          <div className="flex items-center gap-2 text-[#FAFAFA] font-medium text-base border-b border-[#27272A] pb-3">
-            <Tv size={18} className="text-amber-500" />
-            <h2>Bonus Buy Panel</h2>
+
+          <div className="flex items-center justify-between border-b border-[#27272A] pb-3">
+            <div className="flex items-center gap-2.5 text-[#FAFAFA] font-medium text-base">
+              <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400">
+                <Gift size={20} />
+              </div>
+              <h2 className="font-bold">Bonus Buy Panel</h2>
+            </div>
           </div>
 
-          {/* Форма создания стрима */}
           <form onSubmit={handleCreate} className="flex flex-col sm:flex-row gap-3 items-end bg-[#18181B] p-4 rounded-xl border border-[#27272A]">
-            <div className="w-full sm:w-28">
+            <div className="w-full sm:w-24">
               <label className="block text-[10px] font-mono text-[#A1A1AA] mb-1 uppercase">
                 № Стрима
               </label>
@@ -119,9 +156,22 @@ export const HistoryPage: React.FC = () => {
                 type="text"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
-                placeholder="Например: Bonus Buy Marathon"
+                placeholder="Bonus Buy Marathon"
                 className="w-full bg-[#09090B] border border-[#27272A] rounded-xl px-3 py-1.5 text-xs text-white placeholder-[#52525B] focus:outline-none focus:border-[#52525B]"
                 required
+              />
+            </div>
+
+            <div className="w-full sm:w-32">
+              <label className="block text-[10px] font-mono text-[#A1A1AA] mb-1 uppercase">
+                Баланс ($)
+              </label>
+              <input
+                type="number"
+                value={startBalance}
+                onChange={(e) => setStartBalance(Number(e.target.value))}
+                placeholder="1000"
+                className="w-full bg-[#09090B] border border-[#27272A] rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-[#52525B]"
               />
             </div>
 
@@ -135,9 +185,15 @@ export const HistoryPage: React.FC = () => {
             </button>
           </form>
 
-          {/* Список стримов */}
           <div>
-            <div className="text-xs font-mono text-[#A1A1AA] uppercase mb-3">Список всех стримов</div>
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-mono text-[#A1A1AA] uppercase">Список всех стримов</span>
+              {streams.length > 0 && (
+                <span className="text-[10px] font-mono text-[#71717A]">
+                  Всего: {streams.length}
+                </span>
+              )}
+            </div>
 
             {loading ? (
               <div className="text-center py-6 text-[#A1A1AA] text-xs font-mono">
@@ -149,32 +205,31 @@ export const HistoryPage: React.FC = () => {
               </div>
             ) : (
               <div className="space-y-2">
-                {streams.map((s) => (
+                {latestStream && (
                   <div
-                    key={s.id}
-                    onClick={() => handleOpenStream(s.id)}
+                    onClick={() => handleOpenStream(latestStream.id)}
                     className="group bg-[#18181B] hover:bg-[#27272A] border border-[#27272A] hover:border-[#3F3F46] rounded-xl p-3 flex items-center justify-between cursor-pointer transition"
                   >
                     <div className="flex items-center gap-3">
                       <span className="text-[11px] font-mono font-medium px-2 py-0.5 bg-[#09090B] border border-[#27272A] text-[#A1A1AA] rounded-md">
-                        #{s.stream_number}
+                        #{latestStream.stream_number}
                       </span>
                       <span className="text-xs font-medium text-white transition">
-                        {s.title}
+                        {latestStream.title}
                       </span>
                     </div>
 
                     <div className="flex items-center gap-2">
                       <button
                         type="button"
-                        onClick={(e) => handleOpenStream(s.id, e)}
+                        onClick={(e) => handleOpenStream(latestStream.id, e)}
                         className="text-xs bg-[#27272A] group-hover:bg-[#3F3F46] border border-[#3F3F46] text-white px-2.5 py-1 rounded-lg flex items-center gap-1 transition cursor-pointer"
                       >
                         Открыть админку <ArrowRight size={11} />
                       </button>
                       <button
                         type="button"
-                        onClick={(e) => handleDelete(s.id, e)}
+                        onClick={(e) => handleDelete(latestStream.id, e)}
                         className="p-1 text-[#71717A] hover:text-red-400 hover:bg-[#09090B] rounded-lg transition cursor-pointer"
                         title="Удалить"
                       >
@@ -182,16 +237,76 @@ export const HistoryPage: React.FC = () => {
                       </button>
                     </div>
                   </div>
-                ))}
+                )}
+
+                {olderStreams.length > 0 && (
+                  <div className="space-y-2 pt-1">
+                    {showAllStreams &&
+                      olderStreams.map((s) => (
+                        <div
+                          key={s.id}
+                          onClick={() => handleOpenStream(s.id)}
+                          className="group bg-[#18181B]/60 hover:bg-[#18181B] border border-[#27272A]/60 hover:border-[#3F3F46] rounded-xl p-3 flex items-center justify-between cursor-pointer transition"
+                        >
+                          <div className="flex items-center gap-3">
+                            <span className="text-[11px] font-mono font-medium px-2 py-0.5 bg-[#09090B] border border-[#27272A] text-[#71717A] group-hover:text-[#A1A1AA] rounded-md">
+                              #{s.stream_number}
+                            </span>
+                            <span className="text-xs font-medium text-zinc-300 group-hover:text-white transition">
+                              {s.title}
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={(e) => handleOpenStream(s.id, e)}
+                              className="text-xs bg-[#27272A]/70 group-hover:bg-[#3F3F46] border border-[#3F3F46] text-zinc-300 group-hover:text-white px-2.5 py-1 rounded-lg flex items-center gap-1 transition cursor-pointer"
+                            >
+                              Открыть админку <ArrowRight size={11} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => handleDelete(s.id, e)}
+                              className="p-1 text-[#71717A] hover:text-red-400 hover:bg-[#09090B] rounded-lg transition cursor-pointer"
+                              title="Удалить"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+
+                    <button
+                      type="button"
+                      onClick={() => setShowAllStreams(!showAllStreams)}
+                      className="w-full bg-[#18181B] hover:bg-[#27272A] border border-[#27272A] text-[#A1A1AA] hover:text-white text-xs py-2 rounded-xl flex items-center justify-center gap-1.5 transition cursor-pointer font-mono mt-1"
+                    >
+                      {showAllStreams ? (
+                        <>
+                          <ChevronUp size={14} />
+                          <span>Свернуть список</span>
+                        </>
+                      ) : (
+                        <>
+                          <ChevronDown size={14} />
+                          <span>Показать остальные ({olderStreams.length})</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
         </section>
 
-        {/* БЛОК 2: Интерактивное Колесо */}
+        {/* Блок Колеса */}
         <section className="bg-[#121215] border border-[#27272A] rounded-2xl p-5 shadow-xl flex items-center justify-between">
           <div className="flex items-center gap-3 text-[#FAFAFA] font-medium text-base">
-            <Disc size={22} className="text-amber-500" />
+            <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400">
+              <Disc size={22} className="animate-spin-slow" />
+            </div>
             <div>
               <h2 className="font-bold">Интерактивное Колесо</h2>
               <p className="text-xs text-[#71717A]">Создание и запуск рулетки призов на стриме</p>

@@ -1,9 +1,6 @@
-// src/types/theme.ts
-
 export type ThemeId = 'classic' | 'neon' | 'glass' | 'cyberpunk' | 'ai_minimal' | 'ruby';
 
 export interface WidgetThemeTokens {
-    // Поля Tailwind-стилей (из вашей структуры)
     bgContainer: string;
     borderColor: string;
     cardBg: string;
@@ -15,7 +12,6 @@ export interface WidgetThemeTokens {
     badgeBg: string;
     badgeText: string;
 
-    // Опциональные токены для работы CSS-переменных в themeUtils.ts
     bg?: string;
     surface?: string;
     surfaceSecondary?: string;

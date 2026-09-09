@@ -25,10 +25,13 @@ export const QuickAddBonusForm: React.FC<Props> = ({ streamId, onBonusAdded }) =
     setLoading(true);
 
     try {
+      // 🔑 Получаем текущего юзера
+      const { data: { user } } = await supabase.auth.getUser();
+
       const costNumber = Number(buyCost) || 0;
       const metaValue = playerOrProvider.trim() || null;
 
-      // 1. Получаем текущее количество слотов у стрима для точной позиции
+      // 1. Получаем текущее количество слотов у стрима
       const { count } = await supabase
         .from('bonus_buys')
         .select('*', { count: 'exact', head: true })
@@ -36,10 +39,11 @@ export const QuickAddBonusForm: React.FC<Props> = ({ streamId, onBonusAdded }) =
 
       const nextPosition = (count || 0) + 1;
 
-      // 2. Вставляем новый бонус
+      // 2. Вставляем новый бонус С УКАЗАНИЕМ user_id
       const { error } = await supabase.from('bonus_buys').insert([
         {
           stream_id: streamId,
+          user_id: user?.id || null, // 👈 Передаем user_id
           slot_name: slotName.trim(),
           player_name: metaValue,
           provider: metaValue || '—',
@@ -58,7 +62,6 @@ export const QuickAddBonusForm: React.FC<Props> = ({ streamId, onBonusAdded }) =
       setPlayerOrProvider('');
       setBuyCost('');
 
-      // 3. Сообщаем родителю об успешном добавлении
       if (onBonusAdded) {
         onBonusAdded();
       }

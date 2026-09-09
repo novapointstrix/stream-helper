@@ -1,10 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { supabase } from '../lib/supabaseClient';
 import { WheelConfig, WheelSpinEvent } from '../types/wheel.types';
 import { WheelCanvas } from '../components/wheel/WheelCanvas';
-import { subscribeToBroadcast } from '../lib/broadcast';
 import { wheelAudio } from '../utils/wheelAudio';
 
 export const WheelOverlayPage: React.FC = () => {
+    const [searchParams] = useSearchParams();
+    const token = searchParams.get('token');
+
     const [visible, setVisible] = useState(false);
     const [config, setConfig] = useState<WheelConfig | null>(null);
     const [rotation, setRotation] = useState(0);
@@ -14,17 +18,30 @@ export const WheelOverlayPage: React.FC = () => {
     const lastTickSegmentRef = useRef<number>(-1);
 
     useEffect(() => {
-        const unsubscribe = subscribeToBroadcast('WHEEL_SPIN_EVENT', (data: WheelSpinEvent) => {
-            startSpinSequence(data);
-        });
+        if (!token) return;
+
+        // Подписка на уникальный канал токена пользователя
+        const channelName = `wheel_events_${token}`;
+        const channel = supabase
+            .channel(channelName)
+            .on(
+                'broadcast',
+                { event: 'WHEEL_SPIN_EVENT' },
+                (payload: { payload: WheelSpinEvent }) => {
+                    if (payload?.payload) {
+                        startSpinSequence(payload.payload);
+                    }
+                }
+            )
+            .subscribe();
 
         return () => {
-            unsubscribe();
+            supabase.removeChannel(channel);
             if (animRef.current !== null) {
                 cancelAnimationFrame(animRef.current);
             }
         };
-    }, []);
+    }, [token]);
 
     const startSpinSequence = (eventData: WheelSpinEvent) => {
         if (animRef.current !== null) {
@@ -52,7 +69,6 @@ export const WheelOverlayPage: React.FC = () => {
             const easeProgress = 1 - Math.pow(1 - progress, 3);
             const currentRot = finalTargetRotation * easeProgress;
 
-            // Звук щелчка при прохождении каждого сектора
             if (segmentsCount > 0) {
                 const currentSegment = Math.floor(currentRot / segmentAngle);
                 if (currentSegment !== lastTickSegmentRef.current) {
@@ -67,18 +83,24 @@ export const WheelOverlayPage: React.FC = () => {
                 animRef.current = requestAnimationFrame(animate);
             } else {
                 setWinner({ name: eventData.winnerName, prize: eventData.prizeLabel });
-
-                // Звук победных фанфар
                 wheelAudio.playWin();
 
                 setTimeout(() => {
                     setVisible(false);
-                }, 3500);
+                }, 4000);
             }
         };
 
         animRef.current = requestAnimationFrame(animate);
     };
+
+    if (!token) {
+        return (
+            <div className="fixed inset-0 bg-black/80 flex items-center justify-center text-red-500 font-mono font-bold text-lg">
+                Ошибка: Укажите параметр token в URL (?token=YOUR_TOKEN)
+            </div>
+        );
+    }
 
     if (!visible || !config) return null;
 
@@ -91,11 +113,9 @@ export const WheelOverlayPage: React.FC = () => {
                     transform: visible ? 'scale(1)' : 'scale(0.85)'
                 }}
             >
-                {/* Центрированный контейнер колеса с иконкой */}
                 <div className="relative flex items-center justify-center">
                     <WheelCanvas config={config} rotation={rotation} size={500} />
 
-                    {/* Иконка бургера по центру */}
                     <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-30 pointer-events-none flex items-center justify-center">
                         <img
                             src="/icons/burger.png"
@@ -105,7 +125,6 @@ export const WheelOverlayPage: React.FC = () => {
                     </div>
                 </div>
 
-                {/* Полностью статичная плашка без анимаций и миганий */}
                 {winner && (
                     <div className="mt-8 text-center bg-gray-900/90 border border-indigo-500/50 p-6 rounded-2xl shadow-2xl backdrop-blur-md">
                         <div className="text-sm font-medium text-indigo-400 tracking-widest uppercase select-none">ПОЗДРАВЛЯЕМ!</div>

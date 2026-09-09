@@ -11,9 +11,9 @@ interface WheelCanvasProps {
 export const WheelCanvas: React.FC<WheelCanvasProps> = ({ config, rotation = 0, size = 400 }) => {
     const radius = size / 2;
     const center = radius;
-    const segmentAngle = 360 / config.segments.length;
+    const hasSegments = config.segments && config.segments.length > 0;
+    const segmentAngle = hasSegments ? 360 / config.segments.length : 360;
 
-    // Стилевые пресеты
     const getPresetStyles = () => {
         switch (config.preset) {
             case 'neon':
@@ -51,13 +51,11 @@ export const WheelCanvas: React.FC<WheelCanvasProps> = ({ config, rotation = 0, 
 
     return (
         <div className="relative flex items-center justify-center" style={{ width: size, height: size }}>
-            {/* Верхний указатель (Стрелка на 12 часов) */}
             <div
                 className="absolute -top-3 z-20 w-0 h-0 border-l-[14px] border-r-[14px] border-t-[28px] border-l-transparent border-r-transparent drop-shadow-md transition-colors"
                 style={{ borderTopColor: styles.pointerColor }}
             />
 
-            {/* SVG Колесо */}
             <svg
                 width={size}
                 height={size}
@@ -65,45 +63,54 @@ export const WheelCanvas: React.FC<WheelCanvasProps> = ({ config, rotation = 0, 
                 className="rounded-full transition-transform ease-out"
             >
                 <g style={{ transform: `rotate(${rotation}deg)`, transformOrigin: 'center' }}>
-                    {config.segments.map((segment, index) => {
-                        const startAngle = index * segmentAngle;
-                        const endAngle = startAngle + segmentAngle;
-                        const pathData = describeArc(center, center, radius - 10, startAngle, endAngle);
+                    {hasSegments ? (
+                        config.segments.map((segment, index) => {
+                            const startAngle = index * segmentAngle;
+                            const endAngle = startAngle + segmentAngle;
+                            const pathData = describeArc(center, center, radius - 10, startAngle, endAngle);
 
-                        // Поворот текста в центр сектора
-                        const textAngle = startAngle + segmentAngle / 2;
-                        const textRad = ((textAngle - 90) * Math.PI) / 180;
-                        const textRadius = radius * 0.65;
-                        const textX = center + textRadius * Math.cos(textRad);
-                        const textY = center + textRadius * Math.sin(textRad);
+                            const textAngle = startAngle + segmentAngle / 2;
+                            const textRad = ((textAngle - 90) * Math.PI) / 180;
+                            const textRadius = radius * 0.65;
+                            const textX = center + textRadius * Math.cos(textRad);
+                            const textY = center + textRadius * Math.sin(textRad);
 
-                        return (
-                            <g key={segment.id || index}>
-                                <path
-                                    d={pathData}
-                                    fill={segment.color}
-                                    stroke={styles.stroke}
-                                    strokeWidth={styles.strokeWidth}
-                                />
-                                <text
-                                    x={textX}
-                                    y={textY}
-                                    fill={segment.textColor || '#ffffff'}
-                                    fontSize={Math.max(12, Math.min(18, 160 / config.segments.length))}
-                                    fontWeight="bold"
-                                    textAnchor="middle"
-                                    dominantBaseline="middle"
-                                    transform={`rotate(${textAngle + 90}, ${textX}, ${textY})`}
-                                    className="select-none pointer-events-none drop-shadow"
-                                >
-                                    {segment.label}
-                                </text>
-                            </g>
-                        );
-                    })}
+                            return (
+                                <g key={segment.id || index}>
+                                    <path
+                                        d={pathData}
+                                        fill={segment.color}
+                                        stroke={styles.stroke}
+                                        strokeWidth={styles.strokeWidth}
+                                    />
+                                    <text
+                                        x={textX}
+                                        y={textY}
+                                        fill={segment.textColor || '#ffffff'}
+                                        fontSize={Math.max(12, Math.min(18, 160 / config.segments.length))}
+                                        fontWeight="bold"
+                                        textAnchor="middle"
+                                        dominantBaseline="middle"
+                                        transform={`rotate(${textAngle + 90}, ${textX}, ${textY})`}
+                                        className="select-none pointer-events-none drop-shadow"
+                                    >
+                                        {segment.label}
+                                    </text>
+                                </g>
+                            );
+                        })
+                    ) : (
+                        <circle
+                            cx={center}
+                            cy={center}
+                            r={radius - 10}
+                            fill="#111827"
+                            stroke={styles.stroke}
+                            strokeWidth={styles.strokeWidth}
+                        />
+                    )}
                 </g>
 
-                {/* Центральная кнопка/заглушка */}
                 <circle
                     cx={center}
                     cy={center}
@@ -114,7 +121,6 @@ export const WheelCanvas: React.FC<WheelCanvasProps> = ({ config, rotation = 0, 
                 />
             </svg>
 
-            {/* Иконка бургера в самом центре втулки */}
             <div
                 className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-30 pointer-events-none flex items-center justify-center"
                 style={{ width: size * 0.22, height: size * 0.22 }}

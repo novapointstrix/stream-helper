@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { WheelSector } from '../types/database.types';
 import { wheelAudio } from '../utils/wheelAudio';
+import { LOGO_OPTIONS } from '../components/StreamIconRenderer';
 
 export const OBSWheelOverlayPage: React.FC = () => {
     const [searchParams] = useSearchParams();
@@ -11,6 +12,7 @@ export const OBSWheelOverlayPage: React.FC = () => {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
     const [userId, setUserId] = useState<string | null>(null);
+    const [streamIcon, setStreamIcon] = useState<string>('burger');
     const [playerName, setPlayerName] = useState('');
     const [winner, setWinner] = useState<WheelSector | null>(null);
     const [visible, setVisible] = useState(false);
@@ -19,21 +21,21 @@ export const OBSWheelOverlayPage: React.FC = () => {
     const lastSectorIndexRef = useRef<number>(-1);
     const hideTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-    // ---------------------------------------------------------
-    // ПОЛУЧЕНИЕ USER_ID ПО OBS_TOKEN
-    // ---------------------------------------------------------
     useEffect(() => {
         const fetchUserByToken = async () => {
             if (!token) return;
 
             const { data, error } = await supabase
                 .from('profiles')
-                .select('id')
+                .select('id, stream_icon')
                 .eq('obs_token', token)
                 .maybeSingle();
 
             if (data && !error) {
                 setUserId(data.id);
+                if (data.stream_icon) {
+                    setStreamIcon(data.stream_icon);
+                }
             } else {
                 console.error('Ошибка верификации OBS токена или пользователь не найден');
             }
@@ -42,9 +44,32 @@ export const OBSWheelOverlayPage: React.FC = () => {
         fetchUserByToken();
     }, [token]);
 
-    // ---------------------------------------------------------
-    // ОТКЛЮЧЕНИЕ СКРОЛЛА
-    // ---------------------------------------------------------
+    useEffect(() => {
+        if (!userId) return;
+
+        const profileChannel = supabase
+            .channel(`obs_wheel_profile_${userId}`)
+            .on(
+                'postgres_changes',
+                {
+                    event: 'UPDATE',
+                    schema: 'public',
+                    table: 'profiles',
+                    filter: `id=eq.${userId}`,
+                },
+                (payload) => {
+                    if (payload.new && (payload.new as any).stream_icon) {
+                        setStreamIcon((payload.new as any).stream_icon);
+                    }
+                }
+            )
+            .subscribe();
+
+        return () => {
+            supabase.removeChannel(profileChannel);
+        };
+    }, [userId]);
+
     useEffect(() => {
         const originalBodyOverflow = document.body.style.overflow;
         const originalHtmlOverflow = document.documentElement.style.overflow;
@@ -58,7 +83,6 @@ export const OBSWheelOverlayPage: React.FC = () => {
         };
     }, []);
 
-    // Управление монтированием/демонтированием
     useEffect(() => {
         if (visible) {
             setShouldRender(true);
@@ -72,68 +96,67 @@ export const OBSWheelOverlayPage: React.FC = () => {
         }
     }, [visible]);
 
-    // ---------------------------------------------------------
-    // ОТРИСОВКА ВЕКТОРНОГО БУРГЕРА
-    // ---------------------------------------------------------
-    const drawVectorBurger = (ctx: CanvasRenderingContext2D, center: number) => {
+    // Отрисовка цветного векторного бургера / выбранной иконки в центре Canvas
+    const drawCenterIcon = (ctx: CanvasRenderingContext2D, center: number, iconId: string) => {
         ctx.save();
         ctx.translate(center, center);
 
-        const scale = 0.85;
-        ctx.scale(scale, scale);
+        const currentLogo = LOGO_OPTIONS.find((opt) => opt.id === iconId) || LOGO_OPTIONS[0];
 
-        ctx.beginPath();
-        ctx.arc(0, -2, 18, Math.PI, 0, false);
-        ctx.fillStyle = '#E28743';
-        ctx.fill();
+        if (currentLogo.id === 'burger') {
+            const scale = 1.3;
+            ctx.scale(scale, scale);
 
-        ctx.fillStyle = '#FFF8E7';
-        const seeds = [
-            { x: -8, y: -10 },
-            { x: 0, y: -13 },
-            { x: 8, y: -9 },
-            { x: -4, y: -6 },
-            { x: 4, y: -5 }
-        ];
-        seeds.forEach((seed) => {
+            // Верхняя булочка
             ctx.beginPath();
-            ctx.ellipse(seed.x, seed.y, 1.3, 0.7, Math.PI / 4, 0, Math.PI * 2);
+            ctx.pathFromPath2D?.(new Path2D("M-10 -2 C-10 -7.5 -5.5 -11 0 -11 C5.5 -11 10 -7.5 10 -2 Z"));
+            ctx.fillStyle = "#E58A42";
             ctx.fill();
-        });
 
-        ctx.beginPath();
-        ctx.fillStyle = '#48BB78';
-        ctx.roundRect(-19, -2, 38, 4, 2);
-        ctx.fill();
+            // Кунжут
+            ctx.fillStyle = "#FCE7D0";
+            ctx.beginPath(); ctx.arc(-4, -6, 0.7, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.arc(0, -7.5, 0.7, 0, Math.PI * 2); ctx.fill();
+            ctx.beginPath(); ctx.arc(4, -6, 0.7, 0, Math.PI * 2); ctx.fill();
 
-        ctx.beginPath();
-        ctx.fillStyle = '#ECC94B';
-        ctx.moveTo(-18, 2);
-        ctx.lineTo(18, 2);
-        ctx.lineTo(18, 6);
-        ctx.lineTo(10, 6);
-        ctx.lineTo(6, 11);
-        ctx.lineTo(2, 6);
-        ctx.lineTo(-18, 6);
-        ctx.closePath();
-        ctx.fill();
+            // Салат
+            ctx.beginPath();
+            ctx.roundRect?.(-11, -1, 22, 2.5, 1.25);
+            ctx.fillStyle = "#34D399";
+            ctx.fill();
 
-        ctx.beginPath();
-        ctx.fillStyle = '#633211';
-        ctx.roundRect(-18, 6, 36, 6, 3);
-        ctx.fill();
+            // Сыр
+            ctx.beginPath();
+            ctx.roundRect?.(-10, 2.5, 20, 2.5, 1);
+            ctx.fillStyle = "#FBBF24";
+            ctx.fill();
 
-        ctx.beginPath();
-        ctx.fillStyle = '#C8702E';
-        ctx.roundRect(-17, 12, 34, 5, [1, 1, 3, 3]);
-        ctx.fill();
+            // Котлета
+            ctx.beginPath();
+            ctx.roundRect?.(-11, 6, 22, 3, 1.5);
+            ctx.fillStyle = "#78350F";
+            ctx.fill();
+
+            // Нижняя булочка
+            ctx.beginPath();
+            ctx.pathFromPath2D?.(new Path2D("M-10 10 C-10 11.5 -8.5 12.5 -7 12.5 H7 C8.5 12.5 10 11.5 10 10 V10 H-10 V10 Z"));
+            ctx.fillStyle = "#E58A42";
+            ctx.fill();
+        } else {
+            // Эмодзи-фоллбэк для остальных иконок
+            ctx.font = '24px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            const symbolMap: Record<string, string> = {
+                flame: '🔥', crown: '👑', gem: '💎', dices: '🎲',
+                rocket: '🚀', sparkles: '✨', gamepad: '🎮', ghost: '👻', beer: '🍺'
+            };
+            ctx.fillText(symbolMap[iconId] || '🍔', 0, 1);
+        }
 
         ctx.restore();
     };
 
-    // ---------------------------------------------------------
-    // ОТРИСОВКА КОЛЕСА
-    // ---------------------------------------------------------
     const drawStaticWheel = (
         angle: number,
         activeSectors: WheelSector[]
@@ -249,14 +272,13 @@ export const OBSWheelOverlayPage: React.FC = () => {
         ctx.lineWidth = 3;
         ctx.stroke();
 
-        drawVectorBurger(ctx, center);
+        drawCenterIcon(ctx, center, streamIcon);
     };
 
-    // ---------------------------------------------------------
-    // SUPABASE REALTIME ПОДКЛЮЧЕНИЕ С УЧЕТОМ USER_ID ИЛИ TOKEN
-    // ---------------------------------------------------------
     useEffect(() => {
-        const channelName = userId ? `wheel_events_${userId}` : 'wheel_events';
+        if (!token) return;
+
+        const channelName = `wheel_events_${token}`;
 
         const channel = supabase.channel(channelName, {
             config: {
@@ -270,7 +292,6 @@ export const OBSWheelOverlayPage: React.FC = () => {
                 { event: 'START_SPIN' },
                 ({ payload }) => {
                     if (payload) {
-                        // Если передан userId в payload, фильтруем не принадлежащие события
                         if (userId && payload.userId && payload.userId !== userId) {
                             return;
                         }
@@ -283,11 +304,8 @@ export const OBSWheelOverlayPage: React.FC = () => {
         return () => {
             supabase.removeChannel(channel);
         };
-    }, [userId]);
+    }, [token, userId, streamIcon]);
 
-    // ---------------------------------------------------------
-    // ЗАПУСК И АНИМАЦИЯ
-    // ---------------------------------------------------------
     const startSpinSequence = (payload: any) => {
         if (hideTimerRef.current) {
             clearTimeout(hideTimerRef.current);
@@ -309,9 +327,6 @@ export const OBSWheelOverlayPage: React.FC = () => {
     const runSpinAnimation = (payload: any) => {
         const canvas = canvasRef.current;
         if (!canvas) return;
-
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
 
         const activeSectors: WheelSector[] = payload.sectors || [];
         const durationMs = payload.durationMs || 6000;

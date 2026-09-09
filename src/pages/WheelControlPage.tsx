@@ -24,6 +24,7 @@ interface WheelPresetDB {
     id: string;
     name: string;
     sectors: WheelSector[];
+    user_id?: string;
 }
 
 interface WheelHistoryItem {
@@ -33,6 +34,7 @@ interface WheelHistoryItem {
     prize_label: string;
     sector_chance: number;
     preset_id?: string;
+    user_id?: string;
 }
 
 const DEFAULT_COLORS = ['#F59E0B', '#EF4444', '#10B981', '#3B82F6', '#8B5CF6', '#EC4899', '#14B8A6', '#F97316'];
@@ -40,6 +42,7 @@ const DEFAULT_COLORS = ['#F59E0B', '#EF4444', '#10B981', '#3B82F6', '#8B5CF6', '
 export const WheelControlPage: React.FC = () => {
     const navigate = useNavigate();
     const [playerName, setPlayerName] = useState('');
+    const [obsToken, setObsToken] = useState<string | null>(null);
 
     const [presets, setPresets] = useState<WheelPresetDB[]>([]);
     const [activePresetId, setActivePresetId] = useState<string>('');
@@ -53,63 +56,89 @@ export const WheelControlPage: React.FC = () => {
     const [isSpinning, setIsSpinning] = useState(false);
     const [copied, setCopied] = useState(false);
 
-    // История прокрутов (только для активного колеса)
     const [wheelHistory, setWheelHistory] = useState<WheelHistoryItem[]>([]);
     const [loadingHistory, setLoadingHistory] = useState(false);
 
-    const fetchPresets = async () => {
+    const fetchUserData = async () => {
         setLoading(true);
-        const { data, error } = await supabase
-            .from('wheel_presets')
-            .select('*')
-            .order('created_at', { ascending: true });
+        const { data: { user } } = await supabase.auth.getUser();
 
-        if (error) {
-            console.error('Ошибка загрузки пресетов:', error);
-        } else if (data && data.length > 0) {
-            setPresets(data);
-            if (!activePresetId) {
-                setActivePresetId(data[0].id);
-                setSectors(data[0].sectors || []);
-                setRenamePresetName(data[0].name);
+        if (user?.id) {
+            const { data: profile } = await supabase
+                .from('profiles')
+                .select('obs_token')
+                .eq('id', user.id)
+                .maybeSingle();
+
+            if (profile?.obs_token) {
+                setObsToken(profile.obs_token);
+            } else {
+                const newToken = crypto.randomUUID().replace(/-/g, '');
+                await supabase
+                    .from('profiles')
+                    .upsert({ id: user.id, obs_token: newToken });
+                setObsToken(newToken);
             }
-        } else {
-            await handleCreateDefaultPreset();
+
+            const { data, error } = await supabase
+                .from('wheel_presets')
+                .select('*')
+                .eq('user_id', user.id)
+                .order('created_at', { ascending: true });
+
+            if (!error && data && data.length > 0) {
+                setPresets(data);
+                if (!activePresetId) {
+                    setActivePresetId(data[0].id);
+                    setSectors(data[0].sectors || []);
+                    setRenamePresetName(data[0].name);
+                }
+            } else {
+                setPresets([]);
+                setActivePresetId('');
+                setSectors([]);
+                setRenamePresetName('');
+            }
         }
         setLoading(false);
     };
 
-    // Загрузка истории ТОЛЬКО для активного пресета (колеса)
     const fetchWheelHistory = async (presetId: string) => {
-        if (!presetId) return;
+        if (!presetId) {
+            setWheelHistory([]);
+            return;
+        }
         setLoadingHistory(true);
-        const { data, error } = await supabase
-            .from('wheel_history')
-            .select('*')
-            .eq('preset_id', presetId)
-            .order('created_at', { ascending: false })
-            .limit(100);
+        const { data: { user } } = await supabase.auth.getUser();
 
-        if (error) {
-            console.error('Ошибка загрузки истории колеса:', error);
-        } else if (data) {
-            setWheelHistory(data);
+        if (user?.id) {
+            const { data, error } = await supabase
+                .from('wheel_history')
+                .select('*')
+                .eq('preset_id', presetId)
+                .eq('user_id', user.id)
+                .order('created_at', { ascending: false })
+                .limit(100);
+
+            if (!error && data) {
+                setWheelHistory(data);
+            }
         }
         setLoadingHistory(false);
     };
 
     useEffect(() => {
-        fetchPresets();
+        fetchUserData();
     }, []);
 
-    // При изменении выбранного колеса — подгружаем его историю
     useEffect(() => {
         if (activePresetId) {
             fetchWheelHistory(activePresetId);
+        } else {
+            setWheelHistory([]);
         }
     }, [activePresetId]);
 
-    // Вычисление статистики (сумма и % выпадений) под текущее колесо
     const wheelStats = useMemo(() => {
         const totalRolls = wheelHistory.length;
         if (totalRolls === 0) return { totalRolls: 0, items: [] };
@@ -131,29 +160,6 @@ export const WheelControlPage: React.FC = () => {
         return { totalRolls, items };
     }, [wheelHistory]);
 
-    const handleCreateDefaultPreset = async () => {
-        const defaultSectors: WheelSector[] = [
-            { id: '1', label: '500$', color: '#F59E0B', chance: 20 },
-            { id: '2', label: '500$', color: '#EF4444', chance: 20 },
-            { id: '3', label: '500$', color: '#10B981', chance: 20 },
-            { id: '4', label: '500$', color: '#3B82F6', chance: 20 },
-            { id: '5', label: 'Ничего', color: '#27272A', chance: 20 },
-        ];
-
-        const { data, error } = await supabase
-            .from('wheel_presets')
-            .insert([{ name: 'Основное ★', sectors: defaultSectors }])
-            .select()
-            .single();
-
-        if (!error && data) {
-            setPresets([data]);
-            setActivePresetId(data.id);
-            setSectors(data.sectors);
-            setRenamePresetName(data.name);
-        }
-    };
-
     const handleSelectPreset = (presetId: string) => {
         setActivePresetId(presetId);
         const selected = presets.find((p) => p.id === presetId);
@@ -169,15 +175,17 @@ export const WheelControlPage: React.FC = () => {
 
     const handleCreatePreset = async () => {
         if (!newPresetName.trim()) return;
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
 
         const initialSectors: WheelSector[] = [
-            { id: '1', label: 'Приз 1', color: '#F59E0B', chance: 50 },
-            { id: '2', label: 'Приз 2', color: '#3B82F6', chance: 50 },
+            { id: crypto.randomUUID(), label: 'Приз 1', color: '#F59E0B', chance: 50 },
+            { id: crypto.randomUUID(), label: 'Приз 2', color: '#3B82F6', chance: 50 },
         ];
 
         const { data, error } = await supabase
             .from('wheel_presets')
-            .insert([{ name: newPresetName.trim(), sectors: initialSectors }])
+            .insert([{ name: newPresetName.trim(), sectors: initialSectors, user_id: user.id }])
             .select()
             .single();
 
@@ -194,11 +202,14 @@ export const WheelControlPage: React.FC = () => {
 
     const handleRenamePreset = async () => {
         if (!renamePresetName.trim() || !activePresetId) return;
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
 
         const { error } = await supabase
             .from('wheel_presets')
             .update({ name: renamePresetName.trim() })
-            .eq('id', activePresetId);
+            .eq('id', activePresetId)
+            .eq('user_id', user.id);
 
         if (error) {
             alert('Ошибка при переименовании: ' + error.message);
@@ -214,39 +225,46 @@ export const WheelControlPage: React.FC = () => {
 
     const handleDeletePreset = async () => {
         if (!activePresetId) return;
-        if (presets.length <= 1) {
-            alert('Нельзя удалить единственный пресет!');
-            return;
-        }
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
 
-        if (!confirm('Вы уверены, что хотите удалить этот пресет? (Все роллы этого колеса также будут удалены из истории)')) return;
+        if (!confirm('Вы уверены, что хотите удалить этот пресет?')) return;
 
-        // Удаляем историю данного колеса
-        await supabase.from('wheel_history').delete().eq('preset_id', activePresetId);
+        await supabase.from('wheel_history').delete().eq('preset_id', activePresetId).eq('user_id', user.id);
 
         const { error } = await supabase
             .from('wheel_presets')
             .delete()
-            .eq('id', activePresetId);
+            .eq('id', activePresetId)
+            .eq('user_id', user.id);
 
         if (error) {
             alert('Ошибка при удалении пресета: ' + error.message);
         } else {
             const filtered = presets.filter((p) => p.id !== activePresetId);
             setPresets(filtered);
-            setActivePresetId(filtered[0].id);
-            setSectors(filtered[0].sectors || []);
-            setRenamePresetName(filtered[0].name);
+            if (filtered.length > 0) {
+                setActivePresetId(filtered[0].id);
+                setSectors(filtered[0].sectors || []);
+                setRenamePresetName(filtered[0].name);
+            } else {
+                setActivePresetId('');
+                setSectors([]);
+                setRenamePresetName('');
+            }
         }
     };
 
     const handleSaveSectors = async () => {
         if (!activePresetId) return;
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
 
         const { error } = await supabase
             .from('wheel_presets')
             .update({ sectors })
-            .eq('id', activePresetId);
+            .eq('id', activePresetId)
+            .eq('user_id', user.id);
 
         if (error) {
             alert('Ошибка сохранения секторов: ' + error.message);
@@ -256,7 +274,7 @@ export const WheelControlPage: React.FC = () => {
                     p.id === activePresetId ? { ...p, sectors } : p
                 )
             );
-            alert('Секторы успешно сохранены в БД!');
+            alert('Секторы успешно сохранены!');
         }
     };
 
@@ -272,19 +290,15 @@ export const WheelControlPage: React.FC = () => {
         setSectors([
             ...sectors,
             {
-                id: Date.now().toString(),
+                id: crypto.randomUUID(),
                 label: `Сектор ${sectors.length + 1}`,
                 color: nextColor,
-                chance: 10,
+                chance: 0,
             },
         ]);
     };
 
     const removeSector = (id: string) => {
-        if (sectors.length <= 2) {
-            alert('В колесе должно быть минимум 2 сектора!');
-            return;
-        }
         setSectors(sectors.filter((s) => s.id !== id));
     };
 
@@ -294,25 +308,26 @@ export const WheelControlPage: React.FC = () => {
         );
     };
 
-    const getRandomWinner = (): WheelSector => {
+    const getRandomWinnerIndex = (): number => {
         const total = sectors.reduce((sum, s) => sum + Number(s.chance || 0), 0);
         let rand = Math.random() * total;
 
-        for (const sector of sectors) {
-            if (rand < sector.chance) {
-                return sector;
+        for (let i = 0; i < sectors.length; i++) {
+            if (rand < sectors[i].chance) {
+                return i;
             }
-            rand -= sector.chance;
+            rand -= sectors[i].chance;
         }
-        return sectors[0];
+        return 0;
     };
 
     const handleLaunchWheel = async () => {
-        if (sectors.length < 2 || !activePresetId || isSpinning) return;
+        if (sectors.length < 2 || !activePresetId || isSpinning || !obsToken) return;
+        const { data: { user } } = await supabase.auth.getUser();
 
         setIsSpinning(true);
-        const winningSector = getRandomWinner();
-        const durationMs = 6000;
+        const winningIndex = getRandomWinnerIndex();
+        const winningSector = sectors[winningIndex];
         const currentPlayer = playerName.trim() || 'Зритель';
 
         try {
@@ -320,6 +335,7 @@ export const WheelControlPage: React.FC = () => {
                 .from('wheel_history')
                 .insert([
                     {
+                        user_id: user?.id || null,
                         preset_id: activePresetId,
                         player_name: currentPlayer,
                         prize_label: winningSector.label,
@@ -327,27 +343,24 @@ export const WheelControlPage: React.FC = () => {
                     }
                 ]);
 
-            if (dbError) {
-                console.error('Ошибка записи истории прокрута в БД:', dbError);
-            } else {
+            if (!dbError) {
                 fetchWheelHistory(activePresetId);
             }
         } catch (err) {
-            console.error('Ошибка при обращении к wheel_history:', err);
+            console.error('Ошибка записи wheel_history:', err);
         }
 
         const payload = {
-            id: Date.now().toString(),
+            userId: user?.id,
             playerName: currentPlayer,
-            sectors,
             winningSectorId: winningSector.id,
-            durationMs,
-            timestamp: Date.now(),
+            sectors: sectors,
+            durationMs: 6000
         };
 
-        const channel = supabase.channel('wheel_events');
+        const channelName = `wheel_events_${obsToken}`;
+        const channel = supabase.channel(channelName);
 
-        // Гарантированная отправка только после установления соединения
         channel.subscribe((status) => {
             if (status === 'SUBSCRIBED') {
                 channel.send({
@@ -355,39 +368,34 @@ export const WheelControlPage: React.FC = () => {
                     event: 'START_SPIN',
                     payload,
                 }).then(() => {
-                    setTimeout(() => {
-                        supabase.removeChannel(channel);
-                    }, 1000);
+                    window.setTimeout(() => {
+                        try {
+                            supabase.removeChannel(channel);
+                        } catch (e) {
+                            console.warn('Ошибка отключения канала:', e);
+                        }
+                    }, 500);
                 });
             }
         });
 
-        setTimeout(() => {
+        window.setTimeout(() => {
             setIsSpinning(false);
-        }, durationMs + 7000);
-    };
-
-    const handleDeleteHistoryItem = async (id: string) => {
-        const { error } = await supabase
-            .from('wheel_history')
-            .delete()
-            .eq('id', id);
-
-        if (error) {
-            alert('Ошибка удаления записи: ' + error.message);
-        } else {
-            setWheelHistory(prev => prev.filter(item => item.id !== id));
-        }
+        }, 11000);
     };
 
     const handleClearHistory = async () => {
         if (!activePresetId) return;
-        if (!confirm('Вы уверены, что хотите очистить историю прокрутов текущего колеса?')) return;
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+
+        if (!confirm('Вы уверены, что хотите очистить всю историю для этого колеса?')) return;
 
         const { error } = await supabase
             .from('wheel_history')
             .delete()
-            .eq('preset_id', activePresetId);
+            .eq('preset_id', activePresetId)
+            .eq('user_id', user.id);
 
         if (error) {
             alert('Ошибка при очистке истории: ' + error.message);
@@ -396,11 +404,29 @@ export const WheelControlPage: React.FC = () => {
         }
     };
 
+    const handleDeleteHistoryItem = async (id: string) => {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+
+        const { error } = await supabase
+            .from('wheel_history')
+            .delete()
+            .eq('id', id)
+            .eq('user_id', user.id);
+
+        if (error) {
+            alert('Ошибка при удалении записи: ' + error.message);
+        } else {
+            setWheelHistory(wheelHistory.filter((item) => item.id !== id));
+        }
+    };
+
     const copyOBSLink = () => {
-        const url = `${window.location.origin}/wheel/overlay`;
+        if (!obsToken) return;
+        const url = `${window.location.origin}/wheel/overlay?token=${obsToken}`;
         navigator.clipboard.writeText(url);
         setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
+        window.setTimeout(() => setCopied(false), 2000);
     };
 
     if (loading) {
@@ -413,7 +439,6 @@ export const WheelControlPage: React.FC = () => {
 
     return (
         <div className="max-w-7xl mx-auto space-y-5 pb-16 px-4">
-
             {/* Шапка */}
             <div className="flex items-center justify-between gap-3 bg-[#121215] border border-[#1F1F24] rounded-2xl p-4 shadow-xl">
                 <div className="flex items-center gap-3">
@@ -433,7 +458,8 @@ export const WheelControlPage: React.FC = () => {
                 <div className="flex items-center gap-2">
                     <button
                         onClick={copyOBSLink}
-                        className="bg-[#18181C] hover:bg-[#222228] border border-[#2A2A32] text-xs font-medium px-3.5 py-2 rounded-xl flex items-center gap-1.5 text-white transition cursor-pointer"
+                        disabled={!obsToken}
+                        className="bg-[#18181C] hover:bg-[#222228] border border-[#2A2A32] text-xs font-medium px-3.5 py-2 rounded-xl flex items-center gap-1.5 text-white transition cursor-pointer disabled:opacity-50"
                     >
                         {copied ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
                         {copied ? 'Скопировано!' : 'Ссылка для OBS'}
@@ -441,13 +467,8 @@ export const WheelControlPage: React.FC = () => {
                 </div>
             </div>
 
-            {/* Основная сетка страницы */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
-
-                {/* Левая колонка: Запуск + Настройка секторов (7 колонок) */}
                 <div className="lg:col-span-7 space-y-5">
-
-                    {/* Ввод ника зрителя и запуск */}
                     <div className="bg-[#121215] border border-[#1F1F24] rounded-2xl p-5 shadow-xl space-y-3">
                         <label className="block text-[11px] font-mono text-gray-400 uppercase tracking-wider">
                             Управление прокрутом
@@ -462,7 +483,7 @@ export const WheelControlPage: React.FC = () => {
                             />
                             <button
                                 onClick={handleLaunchWheel}
-                                disabled={isSpinning || sectors.length < 2}
+                                disabled={isSpinning || sectors.length < 2 || totalChance !== 100}
                                 className="bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-black font-extrabold px-6 py-2.5 rounded-xl text-xs uppercase tracking-wider transition flex items-center justify-center gap-2 shrink-0 cursor-pointer shadow-lg shadow-amber-500/20"
                             >
                                 <Play size={14} className="fill-black" />
@@ -471,7 +492,6 @@ export const WheelControlPage: React.FC = () => {
                         </div>
                     </div>
 
-                    {/* Секторы */}
                     <div className="bg-[#121215] border border-[#1F1F24] rounded-2xl p-5 shadow-xl space-y-4">
                         <div className="flex justify-between items-center">
                             <span className="text-[11px] font-mono text-gray-400 uppercase tracking-wider">
@@ -486,49 +506,55 @@ export const WheelControlPage: React.FC = () => {
                         </div>
 
                         <div className="space-y-2 max-h-[480px] overflow-y-auto pr-1">
-                            {sectors.map((sec) => (
-                                <div
-                                    key={sec.id}
-                                    className="bg-[#0A0A0C] border border-[#1F1F24] rounded-xl p-2.5 flex items-center gap-2.5"
-                                >
-                                    <input
-                                        type="color"
-                                        value={sec.color}
-                                        onChange={(e) => updateSector(sec.id, 'color', e.target.value)}
-                                        className="w-7 h-7 rounded-lg border-0 bg-transparent cursor-pointer shrink-0"
-                                    />
-
-                                    <input
-                                        type="text"
-                                        value={sec.label}
-                                        onChange={(e) => updateSector(sec.id, 'label', e.target.value)}
-                                        placeholder="Название сектора"
-                                        className="flex-1 bg-[#121215] border border-[#2A2A32] rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500"
-                                    />
-
-                                    <div className="flex items-center gap-1 bg-[#121215] border border-[#2A2A32] rounded-lg px-2 py-1 w-24">
-                                        <input
-                                            type="number"
-                                            step="0.1"
-                                            min="0"
-                                            max="100"
-                                            value={sec.chance}
-                                            onChange={(e) =>
-                                                updateSector(sec.id, 'chance', parseFloat(e.target.value) || 0)
-                                            }
-                                            className="w-full bg-transparent text-xs text-white text-right focus:outline-none"
-                                        />
-                                        <span className="text-xs text-gray-400">%</span>
-                                    </div>
-
-                                    <button
-                                        onClick={() => removeSector(sec.id)}
-                                        className="p-1.5 text-gray-400 hover:text-red-400 transition cursor-pointer"
-                                    >
-                                        ✕
-                                    </button>
+                            {sectors.length === 0 ? (
+                                <div className="text-center py-6 text-xs text-gray-500 font-mono">
+                                    Нет доступных секторов. Создайте пресет или добавьте сектор.
                                 </div>
-                            ))}
+                            ) : (
+                                sectors.map((sec) => (
+                                    <div
+                                        key={sec.id}
+                                        className="bg-[#0A0A0C] border border-[#1F1F24] rounded-xl p-2.5 flex items-center gap-2.5"
+                                    >
+                                        <input
+                                            type="color"
+                                            value={sec.color}
+                                            onChange={(e) => updateSector(sec.id, 'color', e.target.value)}
+                                            className="w-7 h-7 rounded-lg border-0 bg-transparent cursor-pointer shrink-0"
+                                        />
+
+                                        <input
+                                            type="text"
+                                            value={sec.label}
+                                            onChange={(e) => updateSector(sec.id, 'label', e.target.value)}
+                                            placeholder="Название сектора"
+                                            className="flex-1 bg-[#121215] border border-[#2A2A32] rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500"
+                                        />
+
+                                        <div className="flex items-center gap-1 bg-[#121215] border border-[#2A2A32] rounded-lg px-2 py-1 w-24">
+                                            <input
+                                                type="number"
+                                                step="0.1"
+                                                min="0"
+                                                max="100"
+                                                value={sec.chance}
+                                                onChange={(e) =>
+                                                    updateSector(sec.id, 'chance', parseFloat(e.target.value) || 0)
+                                                }
+                                                className="w-full bg-transparent text-xs text-white text-right focus:outline-none"
+                                            />
+                                            <span className="text-xs text-gray-400">%</span>
+                                        </div>
+
+                                        <button
+                                            onClick={() => removeSector(sec.id)}
+                                            className="p-1.5 text-gray-400 hover:text-red-400 transition cursor-pointer"
+                                        >
+                                            ✕
+                                        </button>
+                                    </div>
+                                ))
+                            )}
                         </div>
 
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-2">
@@ -548,7 +574,8 @@ export const WheelControlPage: React.FC = () => {
 
                             <button
                                 onClick={handleSaveSectors}
-                                className="bg-amber-500 hover:bg-amber-600 text-black font-extrabold py-2.5 rounded-xl text-xs flex items-center justify-center gap-1.5 transition uppercase tracking-wider cursor-pointer"
+                                disabled={!activePresetId}
+                                className="bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-black font-extrabold py-2.5 rounded-xl text-xs flex items-center justify-center gap-1.5 transition uppercase tracking-wider cursor-pointer"
                             >
                                 <Save size={14} /> Сохранить
                             </button>
@@ -556,10 +583,7 @@ export const WheelControlPage: React.FC = () => {
                     </div>
                 </div>
 
-                {/* Правая колонка: Пресеты + Статистика + История прокрутов (5 колонок) */}
                 <div className="lg:col-span-5 space-y-5">
-
-                    {/* Пресеты */}
                     <div className="bg-[#121215] border border-[#1F1F24] rounded-2xl p-5 shadow-xl space-y-4">
                         <div className="flex items-center justify-between border-b border-[#1F1F24] pb-3">
                             <div className="text-[11px] font-mono text-gray-400 uppercase tracking-wider">
@@ -587,17 +611,23 @@ export const WheelControlPage: React.FC = () => {
 
                         {!isPresetsCollapsed && (
                             <div className="space-y-4 pt-1">
-                                <select
-                                    value={activePresetId}
-                                    onChange={(e) => handleSelectPreset(e.target.value)}
-                                    className="w-full bg-[#0A0A0C] border border-[#2A2A32] rounded-xl px-4 py-2.5 text-xs text-white font-bold focus:outline-none focus:border-amber-500"
-                                >
-                                    {presets.map((p) => (
-                                        <option key={p.id} value={p.id}>
-                                            {p.name}
-                                        </option>
-                                    ))}
-                                </select>
+                                {presets.length > 0 ? (
+                                    <select
+                                        value={activePresetId}
+                                        onChange={(e) => handleSelectPreset(e.target.value)}
+                                        className="w-full bg-[#0A0A0C] border border-[#2A2A32] rounded-xl px-4 py-2.5 text-xs text-white font-bold focus:outline-none focus:border-amber-500"
+                                    >
+                                        {presets.map((p) => (
+                                            <option key={p.id} value={p.id}>
+                                                {p.name}
+                                            </option>
+                                        ))}
+                                    </select>
+                                ) : (
+                                    <div className="text-xs text-gray-500 font-mono">
+                                        Нет созданных пресетов.
+                                    </div>
+                                )}
 
                                 <div className="flex gap-2">
                                     <input
@@ -615,33 +645,36 @@ export const WheelControlPage: React.FC = () => {
                                     </button>
                                 </div>
 
-                                <div className="flex gap-2">
-                                    <input
-                                        type="text"
-                                        value={renamePresetName}
-                                        onChange={(e) => setRenamePresetName(e.target.value)}
-                                        placeholder="Переименовать пресет"
-                                        className="flex-1 bg-[#0A0A0C] border border-[#2A2A32] rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500"
-                                    />
-                                    <button
-                                        onClick={handleRenamePreset}
-                                        className="bg-[#18181C] hover:bg-[#222228] border border-[#2A2A32] text-white font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-1 transition shrink-0 cursor-pointer"
-                                    >
-                                        <Edit3 size={14} /> Обновить
-                                    </button>
-                                </div>
+                                {activePresetId && (
+                                    <>
+                                        <div className="flex gap-2">
+                                            <input
+                                                type="text"
+                                                value={renamePresetName}
+                                                onChange={(e) => setRenamePresetName(e.target.value)}
+                                                placeholder="Переименовать пресет"
+                                                className="flex-1 bg-[#0A0A0C] border border-[#2A2A32] rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500"
+                                            />
+                                            <button
+                                                onClick={handleRenamePreset}
+                                                className="bg-[#18181C] hover:bg-[#222228] border border-[#2A2A32] text-white font-bold px-4 py-2 rounded-xl text-xs flex items-center gap-1 transition shrink-0 cursor-pointer"
+                                            >
+                                                <Edit3 size={14} /> Обновить
+                                            </button>
+                                        </div>
 
-                                <button
-                                    onClick={handleDeletePreset}
-                                    className="w-full bg-red-950/40 hover:bg-red-900/50 border border-red-800/50 text-red-400 font-bold py-2 rounded-xl text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 transition cursor-pointer"
-                                >
-                                    <Trash2 size={14} /> Удалить активный пресет
-                                </button>
+                                        <button
+                                            onClick={handleDeletePreset}
+                                            className="w-full bg-red-950/40 hover:bg-red-900/50 border border-red-800/50 text-red-400 font-bold py-2 rounded-xl text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 transition cursor-pointer"
+                                        >
+                                            <Trash2 size={14} /> Удалить активный пресет
+                                        </button>
+                                    </>
+                                )}
                             </div>
                         )}
                     </div>
 
-                    {/* Статистика выигрышей для ТЕКУЩЕГО КОЛЕСА */}
                     <div className="bg-[#121215] border border-[#1F1F24] rounded-2xl p-5 shadow-xl space-y-3">
                         <div className="flex items-center justify-between border-b border-[#1F1F24] pb-3">
                             <div className="flex items-center gap-2 text-[11px] font-mono text-gray-400 uppercase tracking-wider">
@@ -679,7 +712,6 @@ export const WheelControlPage: React.FC = () => {
                         )}
                     </div>
 
-                    {/* История прокрутов для ТЕКУЩЕГО КОЛЕСА */}
                     <div className="bg-[#121215] border border-[#1F1F24] rounded-2xl p-5 shadow-xl space-y-4">
                         <div className="flex items-center justify-between border-b border-[#1F1F24] pb-3">
                             <div className="flex items-center gap-2 text-[11px] font-mono text-gray-400 uppercase tracking-wider">
@@ -743,11 +775,8 @@ export const WheelControlPage: React.FC = () => {
                             </div>
                         )}
                     </div>
-
                 </div>
-
             </div>
-
         </div>
     );
 };

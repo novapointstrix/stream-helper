@@ -4,12 +4,17 @@ import type { SpinRecord } from '../types/wheel.types'
 
 export const wheelHistoryService = {
     /**
-     * Загрузка последних прокрутов
+     * Загрузка последних прокрутов строго текущего пользователя
      */
     async getHistory(limit = 50): Promise<SpinRecord[]> {
+        const { data: { user } } = await supabase.auth.getUser()
+
+        if (!user) return []
+
         const { data, error } = await supabase
             .from('wheel_history')
             .select('*')
+            .eq('user_id', user.id)
             .order('created_at', { ascending: false })
             .limit(limit)
 
@@ -25,14 +30,22 @@ export const wheelHistoryService = {
      * Сохранение результата нового вращения
      */
     async addRecord(record: Omit<SpinRecord, 'id' | 'created_at'>): Promise<SpinRecord | null> {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) return null
+
+        const payload = {
+            ...record,
+            user_id: user.id
+        }
+
         const { data, error } = await supabase
             .from('wheel_history')
-            .insert([record])
+            .insert([payload])
             .select()
             .single()
 
         if (error) {
-            console.error('Ошибка сохранении прокрута:', error)
+            console.error('Ошибка сохранения прокрута:', error)
             return null
         }
 
@@ -40,13 +53,17 @@ export const wheelHistoryService = {
     },
 
     /**
-     * Удаление записи
+     * Удаление записи текущего пользователя
      */
     async deleteRecord(id: string): Promise<boolean> {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) return false
+
         const { error } = await supabase
             .from('wheel_history')
             .delete()
             .eq('id', id)
+            .eq('user_id', user.id)
 
         if (error) {
             console.error('Ошибка удаления записи:', error)
