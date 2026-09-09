@@ -20,7 +20,6 @@ export const MainPage: React.FC = () => {
 
   const [showAllStreams, setShowAllStreams] = useState(false);
 
-  // Кастомизация иконки стрима из БД (только чтение)
   const [selectedLogoId, setSelectedLogoId] = useState<string>('tv');
 
   const loadProfileIcon = async () => {
@@ -41,8 +40,6 @@ export const MainPage: React.FC = () => {
       console.error('Ошибка загрузки иконки профиля:', err);
     }
   };
-
-  const currentLogoObj = LOGO_OPTIONS.find((opt) => opt.id === selectedLogoId) || LOGO_OPTIONS[0];
 
   const loadStreams = async () => {
     try {
@@ -119,22 +116,22 @@ export const MainPage: React.FC = () => {
   const olderStreams = streams.length > 1 ? streams.slice(1) : [];
 
   return (
-    <div className="min-h-screen bg-[#09090B] text-[#E4E4E7] font-sans p-4 sm:p-8">
-      <div className="max-w-3xl mx-auto space-y-6">
+    <div className="min-h-screen bg-[#09090B] text-[#E4E4E7] font-sans p-3 sm:p-8 overflow-x-hidden">
+      <div className="max-w-3xl mx-auto space-y-4 sm:space-y-6">
 
         {/* Блок Bonus Buy */}
-        <section className="bg-[#121215] border border-[#27272A] rounded-2xl p-5 shadow-xl space-y-6">
+        <section className="bg-[#121215] border border-[#27272A] rounded-2xl p-4 sm:p-5 shadow-xl space-y-4 sm:space-y-6">
 
           <div className="flex items-center justify-between border-b border-[#27272A] pb-3">
             <div className="flex items-center gap-2.5 text-[#FAFAFA] font-medium text-base">
-              <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400">
+              <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 shrink-0">
                 <Gift size={20} />
               </div>
-              <h2 className="font-bold">Bonus Buy Panel</h2>
+              <h2 className="font-bold text-sm sm:text-base">Bonus Buy Panel</h2>
             </div>
           </div>
 
-          <form onSubmit={handleCreate} className="flex flex-col sm:flex-row gap-3 items-end bg-[#18181B] p-4 rounded-xl border border-[#27272A]">
+          <form onSubmit={handleCreate} className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-end bg-[#18181B] p-3.5 sm:p-4 rounded-xl border border-[#27272A]">
             <div className="w-full sm:w-24">
               <label className="block text-[10px] font-mono text-[#A1A1AA] mb-1 uppercase">
                 № Стрима
@@ -143,7 +140,7 @@ export const MainPage: React.FC = () => {
                 type="number"
                 value={streamNumber}
                 onChange={(e) => setStreamNumber(Number(e.target.value))}
-                className="w-full bg-[#09090B] border border-[#27272A] rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-[#52525B]"
+                className="w-full bg-[#09090B] border border-[#27272A] rounded-xl px-3 py-2 sm:py-1.5 text-xs text-white focus:outline-none focus:border-[#52525B]"
                 required
               />
             </div>
@@ -157,7 +154,7 @@ export const MainPage: React.FC = () => {
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 placeholder="Bonus Buy Marathon"
-                className="w-full bg-[#09090B] border border-[#27272A] rounded-xl px-3 py-1.5 text-xs text-white placeholder-[#52525B] focus:outline-none focus:border-[#52525B]"
+                className="w-full bg-[#09090B] border border-[#27272A] rounded-xl px-3 py-2 sm:py-1.5 text-xs text-white placeholder-[#52525B] focus:outline-none focus:border-[#52525B]"
                 required
               />
             </div>
@@ -171,14 +168,14 @@ export const MainPage: React.FC = () => {
                 value={startBalance}
                 onChange={(e) => setStartBalance(Number(e.target.value))}
                 placeholder="1000"
-                className="w-full bg-[#09090B] border border-[#27272A] rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-[#52525B]"
+                className="w-full bg-[#09090B] border border-[#27272A] rounded-xl px-3 py-2 sm:py-1.5 text-xs text-white focus:outline-none focus:border-[#52525B]"
               />
             </div>
 
             <button
               type="submit"
               disabled={creating}
-              className="w-full sm:w-auto bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold px-4 py-1.5 rounded-xl text-xs transition flex items-center justify-center gap-1.5 shrink-0 disabled:opacity-50 cursor-pointer"
+              className="w-full sm:w-auto bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold px-4 py-2 sm:py-1.5 rounded-xl text-xs transition flex items-center justify-center gap-1.5 shrink-0 disabled:opacity-50 cursor-pointer mt-1 sm:mt-0"
             >
               <Plus size={14} />
               {creating ? 'Создание...' : 'Создать'}
@@ -208,29 +205,29 @@ export const MainPage: React.FC = () => {
                 {latestStream && (
                   <div
                     onClick={() => handleOpenStream(latestStream.id)}
-                    className="group bg-[#18181B] hover:bg-[#27272A] border border-[#27272A] hover:border-[#3F3F46] rounded-xl p-3 flex items-center justify-between cursor-pointer transition"
+                    className="group bg-[#18181B] hover:bg-[#27272A] border border-[#27272A] hover:border-[#3F3F46] rounded-xl p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 cursor-pointer transition"
                   >
-                    <div className="flex items-center gap-3">
-                      <span className="text-[11px] font-mono font-medium px-2 py-0.5 bg-[#09090B] border border-[#27272A] text-[#A1A1AA] rounded-md">
+                    <div className="flex items-center gap-2.5 min-w-0 w-full sm:w-auto">
+                      <span className="text-[11px] font-mono font-medium px-2 py-0.5 bg-[#09090B] border border-[#27272A] text-[#A1A1AA] rounded-md shrink-0">
                         #{latestStream.stream_number}
                       </span>
-                      <span className="text-xs font-medium text-white transition">
+                      <span className="text-xs font-medium text-white transition truncate">
                         {latestStream.title}
                       </span>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center justify-between sm:justify-end gap-2 w-full sm:w-auto shrink-0 border-t sm:border-t-0 border-[#27272A] pt-2 sm:pt-0">
                       <button
                         type="button"
                         onClick={(e) => handleOpenStream(latestStream.id, e)}
-                        className="text-xs bg-[#27272A] group-hover:bg-[#3F3F46] border border-[#3F3F46] text-white px-2.5 py-1 rounded-lg flex items-center gap-1 transition cursor-pointer"
+                        className="text-xs bg-[#27272A] group-hover:bg-[#3F3F46] border border-[#3F3F46] text-white px-2.5 py-1 rounded-lg flex items-center justify-center gap-1 transition cursor-pointer flex-1 sm:flex-initial"
                       >
                         Открыть админку <ArrowRight size={11} />
                       </button>
                       <button
                         type="button"
                         onClick={(e) => handleDelete(latestStream.id, e)}
-                        className="p-1 text-[#71717A] hover:text-red-400 hover:bg-[#09090B] rounded-lg transition cursor-pointer"
+                        className="p-1.5 text-[#71717A] hover:text-red-400 hover:bg-[#09090B] rounded-lg transition cursor-pointer shrink-0"
                         title="Удалить"
                       >
                         <Trash2 size={14} />
@@ -246,29 +243,29 @@ export const MainPage: React.FC = () => {
                         <div
                           key={s.id}
                           onClick={() => handleOpenStream(s.id)}
-                          className="group bg-[#18181B]/60 hover:bg-[#18181B] border border-[#27272A]/60 hover:border-[#3F3F46] rounded-xl p-3 flex items-center justify-between cursor-pointer transition"
+                          className="group bg-[#18181B]/60 hover:bg-[#18181B] border border-[#27272A]/60 hover:border-[#3F3F46] rounded-xl p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2.5 cursor-pointer transition"
                         >
-                          <div className="flex items-center gap-3">
-                            <span className="text-[11px] font-mono font-medium px-2 py-0.5 bg-[#09090B] border border-[#27272A] text-[#71717A] group-hover:text-[#A1A1AA] rounded-md">
+                          <div className="flex items-center gap-2.5 min-w-0 w-full sm:w-auto">
+                            <span className="text-[11px] font-mono font-medium px-2 py-0.5 bg-[#09090B] border border-[#27272A] text-[#71717A] group-hover:text-[#A1A1AA] rounded-md shrink-0">
                               #{s.stream_number}
                             </span>
-                            <span className="text-xs font-medium text-zinc-300 group-hover:text-white transition">
+                            <span className="text-xs font-medium text-zinc-300 group-hover:text-white transition truncate">
                               {s.title}
                             </span>
                           </div>
 
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center justify-between sm:justify-end gap-2 w-full sm:w-auto shrink-0 border-t sm:border-t-0 border-[#27272A] pt-2 sm:pt-0">
                             <button
                               type="button"
                               onClick={(e) => handleOpenStream(s.id, e)}
-                              className="text-xs bg-[#27272A]/70 group-hover:bg-[#3F3F46] border border-[#3F3F46] text-zinc-300 group-hover:text-white px-2.5 py-1 rounded-lg flex items-center gap-1 transition cursor-pointer"
+                              className="text-xs bg-[#27272A]/70 group-hover:bg-[#3F3F46] border border-[#3F3F46] text-zinc-300 group-hover:text-white px-2.5 py-1 rounded-lg flex items-center justify-center gap-1 transition cursor-pointer flex-1 sm:flex-initial"
                             >
                               Открыть админку <ArrowRight size={11} />
                             </button>
                             <button
                               type="button"
                               onClick={(e) => handleDelete(s.id, e)}
-                              className="p-1 text-[#71717A] hover:text-red-400 hover:bg-[#09090B] rounded-lg transition cursor-pointer"
+                              className="p-1.5 text-[#71717A] hover:text-red-400 hover:bg-[#09090B] rounded-lg transition cursor-pointer shrink-0"
                               title="Удалить"
                             >
                               <Trash2 size={14} />
@@ -302,13 +299,13 @@ export const MainPage: React.FC = () => {
         </section>
 
         {/* Блок Колеса */}
-        <section className="bg-[#121215] border border-[#27272A] rounded-2xl p-5 shadow-xl flex items-center justify-between">
+        <section className="bg-[#121215] border border-[#27272A] rounded-2xl p-4 sm:p-5 shadow-xl flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4">
           <div className="flex items-center gap-3 text-[#FAFAFA] font-medium text-base">
-            <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400">
+            <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 shrink-0">
               <Disc size={22} className="animate-spin-slow" />
             </div>
             <div>
-              <h2 className="font-bold">Интерактивное Колесо</h2>
+              <h2 className="font-bold text-sm sm:text-base">Интерактивное Колесо</h2>
               <p className="text-xs text-[#71717A]">Создание и запуск рулетки призов на стриме</p>
             </div>
           </div>
@@ -316,7 +313,7 @@ export const MainPage: React.FC = () => {
           <button
             type="button"
             onClick={() => setTimeout(() => navigate('/wheel'), 0)}
-            className="bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold px-5 py-2.5 rounded-xl text-xs transition flex items-center gap-2 cursor-pointer uppercase tracking-wider shrink-0"
+            className="bg-amber-500 hover:bg-amber-400 text-zinc-950 font-bold px-5 py-2.5 rounded-xl text-xs transition flex items-center justify-center gap-2 cursor-pointer uppercase tracking-wider shrink-0"
           >
             ПЕРЕЙТИ К КОЛЕСУ <ArrowRight size={16} />
           </button>

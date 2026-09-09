@@ -17,7 +17,8 @@ import {
     ChevronUp,
     ChevronDown,
     History,
-    BarChart3
+    BarChart3,
+    Lock
 } from 'lucide-react';
 
 interface WheelPresetDB {
@@ -469,9 +470,10 @@ export const WheelControlPage: React.FC = () => {
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
                 <div className="lg:col-span-7 space-y-5">
-                    <div className="bg-[#121215] border border-[#1F1F24] rounded-2xl p-5 shadow-xl space-y-3">
+                    {/* Блок: Управление */}
+                    <div className="relative bg-[#121215] border border-[#1F1F24] rounded-2xl p-5 shadow-xl space-y-3 overflow-hidden">
                         <label className="block text-[11px] font-mono text-gray-400 uppercase tracking-wider">
-                            Управление прокрутом
+                            Управление
                         </label>
                         <div className="flex flex-col sm:flex-row gap-3">
                             <input
@@ -479,20 +481,32 @@ export const WheelControlPage: React.FC = () => {
                                 value={playerName}
                                 onChange={(e) => setPlayerName(e.target.value)}
                                 placeholder="Ник зрителя"
-                                className="flex-1 bg-[#0A0A0C] border border-[#2A2A32] rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500"
+                                disabled={!activePresetId}
+                                className="flex-1 bg-[#0A0A0C] border border-[#2A2A32] rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-amber-500 disabled:opacity-40"
                             />
                             <button
                                 onClick={handleLaunchWheel}
-                                disabled={isSpinning || sectors.length < 2 || totalChance !== 100}
+                                disabled={!activePresetId || isSpinning || sectors.length < 2 || totalChance !== 100}
                                 className="bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-black font-extrabold px-6 py-2.5 rounded-xl text-xs uppercase tracking-wider transition flex items-center justify-center gap-2 shrink-0 cursor-pointer shadow-lg shadow-amber-500/20"
                             >
                                 <Play size={14} className="fill-black" />
                                 {isSpinning ? 'Вращение...' : 'Крутить колесо'}
                             </button>
                         </div>
+
+                        {/* Заглушка, если нет активного пресета */}
+                        {!activePresetId && (
+                            <div className="absolute inset-0 bg-[#121215]/90 backdrop-blur-[2px] z-10 flex items-center justify-center p-4">
+                                <div className="flex items-center gap-2 text-amber-400 font-mono text-xs font-semibold bg-[#18181C] border border-amber-500/30 px-4 py-2 rounded-xl shadow-lg">
+                                    <Lock size={14} />
+                                    <span>Создайте или выберите пресет колеса</span>
+                                </div>
+                            </div>
+                        )}
                     </div>
 
-                    <div className="bg-[#121215] border border-[#1F1F24] rounded-2xl p-5 shadow-xl space-y-4">
+                    {/* Блок: Секторы и шанс выпадения */}
+                    <div className="relative bg-[#121215] border border-[#1F1F24] rounded-2xl p-5 shadow-xl space-y-4 overflow-hidden">
                         <div className="flex justify-between items-center">
                             <span className="text-[11px] font-mono text-gray-400 uppercase tracking-wider">
                                 Секторы и % выпадения
@@ -560,14 +574,16 @@ export const WheelControlPage: React.FC = () => {
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-2">
                             <button
                                 onClick={addSector}
-                                className="bg-[#18181C] hover:bg-[#222228] border border-[#2A2A32] text-white font-bold py-2.5 rounded-xl text-xs flex items-center justify-center gap-1 transition cursor-pointer"
+                                disabled={!activePresetId}
+                                className="bg-[#18181C] hover:bg-[#222228] border border-[#2A2A32] text-white font-bold py-2.5 rounded-xl text-xs flex items-center justify-center gap-1 transition cursor-pointer disabled:opacity-40"
                             >
                                 <Plus size={14} /> Добавить сектор
                             </button>
 
                             <button
                                 onClick={handleEqualizeChances}
-                                className="bg-[#18181C] hover:bg-[#222228] border border-[#2A2A32] text-white font-bold py-2.5 rounded-xl text-xs flex items-center justify-center gap-1 transition cursor-pointer"
+                                disabled={!activePresetId}
+                                className="bg-[#18181C] hover:bg-[#222228] border border-[#2A2A32] text-white font-bold py-2.5 rounded-xl text-xs flex items-center justify-center gap-1 transition cursor-pointer disabled:opacity-40"
                             >
                                 <RotateCcw size={14} /> Разделить 100% поровну
                             </button>
@@ -580,6 +596,16 @@ export const WheelControlPage: React.FC = () => {
                                 <Save size={14} /> Сохранить
                             </button>
                         </div>
+
+                        {/* Заглушка, если нет активного пресета */}
+                        {!activePresetId && (
+                            <div className="absolute inset-0 bg-[#121215]/90 backdrop-blur-[2px] z-10 flex items-center justify-center p-4">
+                                <div className="flex items-center gap-2 text-amber-400 font-mono text-xs font-semibold bg-[#18181C] border border-amber-500/30 px-4 py-2 rounded-xl shadow-lg">
+                                    <Lock size={14} />
+                                    <span>Создайте или выберите пресет колеса</span>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
 
@@ -679,7 +705,7 @@ export const WheelControlPage: React.FC = () => {
                         <div className="flex items-center justify-between border-b border-[#1F1F24] pb-3">
                             <div className="flex items-center gap-2 text-[11px] font-mono text-gray-400 uppercase tracking-wider">
                                 <BarChart3 size={14} className="text-indigo-400" />
-                                <span>Статистика секторов</span>
+                                <span>Статистика</span>
                             </div>
                             <span className="text-[10px] font-mono font-bold px-2.5 py-0.5 bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 rounded-md">
                                 Всего роллов: {wheelStats.totalRolls}
@@ -716,7 +742,7 @@ export const WheelControlPage: React.FC = () => {
                         <div className="flex items-center justify-between border-b border-[#1F1F24] pb-3">
                             <div className="flex items-center gap-2 text-[11px] font-mono text-gray-400 uppercase tracking-wider">
                                 <History size={14} className="text-amber-400" />
-                                <span>История роллов колеса</span>
+                                <span>История</span>
                             </div>
 
                             {wheelHistory.length > 0 && (
