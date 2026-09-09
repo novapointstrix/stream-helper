@@ -13,15 +13,13 @@ export const ChatRollPage: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     // Настройки ролла
     const [streamerChannel, setStreamerChannel] = useState('');
     const [keyword, setKeyword] = useState('!roll');
-    const [useTimer, setUseTimer] = useState(false); // По умолчанию без таймера
+    const [useTimer, setUseTimer] = useState(false);
     const [duration, setDuration] = useState(60);
 
     // Состояния процесса
     const [loadingChannel, setLoadingChannel] = useState(false);
     const [channelError, setChannelError] = useState('');
     const [isActive, setIsActive] = useState(false);
-    // ПЕРЕДЕЛАНО: раньше здесь хранился chatroom_id для Pusher, теперь —
-    // broadcaster_user_id из официального Kick API (см. rollService.ts)
     const [activeBroadcasterId, setActiveBroadcasterId] = useState<number | null>(null);
     const [timeLeft, setTimeLeft] = useState(0);
 
@@ -31,7 +29,7 @@ export const ChatRollPage: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     const [winner, setWinner] = useState<RollParticipant | null>(null);
     const [excludedWinners, setExcludedWinners] = useState<Set<string>>(new Set());
 
-    // История запускoв
+    // История запусков
     const [history, setHistory] = useState<Array<{
         id: string;
         channel: string;
@@ -42,8 +40,6 @@ export const ChatRollPage: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     }>>([]);
 
     const listenerRef = useRef<KickChatListener | null>(null);
-    // Держим актуальное кодовое слово в ref, чтобы обработчик сообщений
-    // всегда сравнивал с последним значением, а не с тем, что было на момент подключения
     const keywordRef = useRef(keyword);
     useEffect(() => {
         keywordRef.current = keyword;
@@ -62,16 +58,16 @@ export const ChatRollPage: React.FC<{ onBack: () => void }> = ({ onBack }) => {
             const saved = localStorage.getItem(STORAGE_KEY);
             if (saved) {
                 const parsed = JSON.parse(saved);
-                setStreamerChannel(parsed.streamerChannel || '');
-                setKeyword(parsed.keyword || '!roll');
-                setUseTimer(parsed.useTimer || false);
-                setDuration(parsed.duration || 60);
-                setParticipants(parsed.participants || []);
-                setMessagesCount(parsed.messagesCount || 0);
-                setIsActive(parsed.isActive || false);
-                setActiveBroadcasterId(parsed.activeBroadcasterId ?? null);
-                setWinner(parsed.winner || null);
-                setHistory(parsed.history || []);
+                setStreamerChannel(parsed?.streamerChannel || '');
+                setKeyword(parsed?.keyword || '!roll');
+                setUseTimer(parsed?.useTimer || false);
+                setDuration(parsed?.duration || 60);
+                setParticipants(parsed?.participants || []);
+                setMessagesCount(parsed?.messagesCount || 0);
+                setIsActive(parsed?.isActive || false);
+                setActiveBroadcasterId(parsed?.activeBroadcasterId ?? null);
+                setWinner(parsed?.winner || null);
+                setHistory(parsed?.history || []);
             }
         } catch (e) {
             console.error('Ошибка чтения из localStorage:', e);
@@ -95,9 +91,7 @@ export const ChatRollPage: React.FC<{ onBack: () => void }> = ({ onBack }) => {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(stateToSave));
     }, [streamerChannel, keyword, useTimer, duration, participants, messagesCount, isActive, activeBroadcasterId, winner, history]);
 
-    // Функция подключения прослушки чата.
-    // ПЕРЕДЕЛАНО: connect теперь асинхронный — сначала просит наш бэкенд создать
-    // подписку в официальном Kick Events API, потом открывает SSE-поток.
+    // Функция подключения к чату Kick через SSE
     const connectToChat = async (broadcasterUserId: number) => {
         if (listenerRef.current) {
             await listenerRef.current.disconnect();
@@ -109,16 +103,12 @@ export const ChatRollPage: React.FC<{ onBack: () => void }> = ({ onBack }) => {
         await listener.connect(broadcasterUserId, (msg: KickChatMessage) => {
             setMessagesCount(prev => prev + 1);
 
-            // Сравнение кодового слова без учета регистра и спецсимволов для любых языков
-            // Берём кодовое слово из ref — актуальное на момент прихода сообщения,
-            // а не то, что было на момент вызова connectToChat
-            const cleanMsg = msg.content.trim().toLowerCase();
-            const cleanKw = keywordRef.current.trim().toLowerCase();
+            const cleanMsg = msg?.content?.trim().toLowerCase() || '';
+            const cleanKw = keywordRef.current?.trim().toLowerCase() || '';
 
-            if (cleanMsg === cleanKw) {
-                // is_vip / is_subscriber теперь считает бэкенд из вебхук-пейлоада
-                // Kick (см. server.js) — фронтенду просто отдаются готовые флаги
-                const { is_vip: isVip, is_subscriber: isSub } = msg.sender;
+            if (cleanMsg && cleanKw && cleanMsg === cleanKw) {
+                const isVip = msg?.sender?.is_vip ?? false;
+                const isSub = msg?.sender?.is_subscriber ?? false;
                 const weight = calculateParticipantWeight(isVip, isSub, multipliers);
 
                 setParticipants(prev => {
@@ -146,9 +136,6 @@ export const ChatRollPage: React.FC<{ onBack: () => void }> = ({ onBack }) => {
         });
     };
 
-    // ЕДИНСТВЕННОЕ место, которое подключается/переподключается к чату —
-    // срабатывает и при запуске нового ролла (когда меняются isActive/activeBroadcasterId),
-    // и при восстановлении активной сессии после перезагрузки страницы.
     useEffect(() => {
         if (isActive && activeBroadcasterId) {
             connectToChat(activeBroadcasterId);
@@ -183,13 +170,11 @@ export const ChatRollPage: React.FC<{ onBack: () => void }> = ({ onBack }) => {
         setExcludedWinners(new Set());
         setTimeLeft(useTimer ? duration : 0);
 
-        // Подключение к чату теперь делает ТОЛЬКО useEffect выше, реагируя на эти изменения —
-        // здесь мы просто выставляем состояние, а не подключаемся напрямую
         setActiveBroadcasterId(broadcaster.broadcasterUserId);
         setIsActive(true);
     };
 
-    // Обратный отсчет (только если включен таймер)
+    // Обратный отсчет
     useEffect(() => {
         if (!isActive || !useTimer || timeLeft <= 0) {
             if (isActive && useTimer && timeLeft === 0) {

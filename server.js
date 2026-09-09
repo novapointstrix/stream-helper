@@ -1,15 +1,4 @@
 // backend/server.js
-//
-// Замена старой связки "CORS-прокси + прямой Pusher-коннект", которую Kick
-// закрыл (см. README_KICK_MIGRATION.md). Теперь всё идёт через официальный
-// Kick Public API + Events (webhooks):
-//
-//   1) app access token через client_credentials
-//   2) поиск канала по нику -> GET /public/v1/channels?slug=...
-//   3) подписка на chat.message.sent -> POST /public/v1/events/subscriptions
-//   4) Kick шлёт события на наш публичный вебхук -> POST /api/kick/webhook
-//   5) мы ретранслируем их фронтенду через Server-Sent Events (SSE)
-
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -84,34 +73,58 @@ async function kickApiFetch(path, options = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// 2. Поиск канала по нику
+// 2. Поиск канала по нику / ссылке (исправлено с поддержкой slug / username)
 // ---------------------------------------------------------------------------
 app.get('/api/kick/channel', async (req, res) => {
-    const username = String(req.query.username || '').trim().toLowerCase();
-    if (!username) return res.status(400).json({ error: 'username required' });
+    const rawInput = String(req.query.username || req.query.slug || '').trim();
+    if (!rawInput) return res.status(400).json({ error: 'username required' });
+
+    // Очищаем входные данные от ссылок (например: https://kick.com/lord-treputin2 -> lord-treputin2)
+    let cleanSlug = rawInput
+        .replace(/^https?:\/\/(www\.)?kick\.com\//i, '')
+        .split('/')[0]
+        .split('?')[0]
+        .trim()
+        .toLowerCase();
 
     try {
-        const kickRes = await kickApiFetch(`/channels?slug=${encodeURIComponent(username)}`);
+        // Пробуем найти канал сначала по точному имени из запроса
+        let kickRes = await kickApiFetch(`/channels?slug=${encodeURIComponent(cleanSlug)}`);
+
+        // Если не найден и в имени были подчёркивания, пробуем вариант с дефисами
+        if (!kickRes.ok && cleanSlug.includes('_')) {
+            const altSlug = cleanSlug.replace(/_/g, '-');
+            console.log(`[Kick Backend] Канал ${cleanSlug} не найден. Пробуем alt slug: ${altSlug}`);
+            const altRes = await kickApiFetch(`/channels?slug=${encodeURIComponent(altSlug)}`);
+            if (altRes.ok) {
+                kickRes = altRes;
+                cleanSlug = altSlug;
+            }
+        }
 
         if (!kickRes.ok) {
-            console.error(`[Kick Backend] Kick API вернул статус ${kickRes.status}`);
-            return res.status(kickRes.status).json({ error: 'Kick API error' });
+            console.error(`[Kick Backend] Kick API вернул статус ${kickRes.status} для slug "${cleanSlug}"`);
+            return res.status(kickRes.status).json({ error: 'Kick API channel error' });
         }
 
         const body = await kickRes.json();
-
-        // Поддержка ответов видов { data: [...] } и { data: { ... } }
         const channelsData = Array.isArray(body?.data) ? body.data : (body?.data ? [body.data] : []);
         const channel = channelsData[0];
 
         if (!channel) {
-            console.warn(`[Kick Backend] Канал ${username} не найден в Kick API`);
+            console.warn(`[Kick Backend] Канал "${cleanSlug}" не найден в Kick API`);
             return res.status(404).json({ error: 'channel not found' });
         }
 
+        const broadcasterUserId = channel.broadcaster_user_id || channel.user_id || channel.id;
+        const officialUsername = channel.user?.username || channel.slug || cleanSlug;
+
+        console.log(`[Kick Backend Success] Канал найден: ${officialUsername} (ID: ${broadcasterUserId})`);
+
         res.json({
-            broadcasterUserId: channel.broadcaster_user_id || channel.user_id || channel.id,
-            slug: channel.slug || username,
+            broadcasterUserId: broadcasterUserId,
+            slug: channel.slug || cleanSlug,
+            username: officialUsername
         });
     } catch (err) {
         console.error('[Kick Backend] /api/kick/channel error:', err);
@@ -238,4 +251,9 @@ app.post('/api/kick/webhook', express.json({ type: '*/*' }), (req, res) => {
 
 app.listen(PORT, () => {
     console.log(`[Kick Backend] Сервер запущен: http://localhost:${PORT}`);
+});
+
+app.use((req, res, next) => {
+    res.setHeader('bypass-tunnel-reminder', 'true');
+    next();
 });
