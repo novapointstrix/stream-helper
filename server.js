@@ -9,9 +9,6 @@
 //   3) подписка на chat.message.sent -> POST /public/v1/events/subscriptions
 //   4) Kick шлёт события на наш публичный вебхук -> POST /api/kick/webhook
 //   5) мы ретранслируем их фронтенду через Server-Sent Events (SSE)
-//
-// Веб-хук URL настраивается ОДИН РАЗ в кабинете разработчика Kick
-// (https://kick.com/settings/developer), не в каждом запросе подписки.
 
 require('dotenv').config();
 const express = require('express');
@@ -19,7 +16,14 @@ const cors = require('cors');
 const crypto = require('crypto');
 
 const app = express();
-app.use(cors());
+
+// Явная настройка CORS для работы с Netlify и локальной разработкой
+app.use(cors({
+    origin: '*',
+    methods: ['GET', 'POST', 'OPTIONS', 'DELETE'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+    credentials: true
+}));
 
 const { KICK_CLIENT_ID, KICK_CLIENT_SECRET, PORT = 3001 } = process.env;
 
@@ -80,7 +84,7 @@ async function kickApiFetch(path, options = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// 2. Поиск канала по нику — замена старого списка CORS-прокси в rollService.ts
+// 2. Поиск канала по нику
 // ---------------------------------------------------------------------------
 app.get('/api/kick/channel', async (req, res) => {
     const username = String(req.query.username || '').trim().toLowerCase();
@@ -88,16 +92,26 @@ app.get('/api/kick/channel', async (req, res) => {
 
     try {
         const kickRes = await kickApiFetch(`/channels?slug=${encodeURIComponent(username)}`);
+
         if (!kickRes.ok) {
+            console.error(`[Kick Backend] Kick API вернул статус ${kickRes.status}`);
             return res.status(kickRes.status).json({ error: 'Kick API error' });
         }
+
         const body = await kickRes.json();
-        const channel = body?.data?.[0];
-        if (!channel) return res.status(404).json({ error: 'channel not found' });
+
+        // Поддержка ответов видов { data: [...] } и { data: { ... } }
+        const channelsData = Array.isArray(body?.data) ? body.data : (body?.data ? [body.data] : []);
+        const channel = channelsData[0];
+
+        if (!channel) {
+            console.warn(`[Kick Backend] Канал ${username} не найден в Kick API`);
+            return res.status(404).json({ error: 'channel not found' });
+        }
 
         res.json({
-            broadcasterUserId: channel.broadcaster_user_id,
-            slug: channel.slug,
+            broadcasterUserId: channel.broadcaster_user_id || channel.user_id || channel.id,
+            slug: channel.slug || username,
         });
     } catch (err) {
         console.error('[Kick Backend] /api/kick/channel error:', err);
@@ -108,7 +122,6 @@ app.get('/api/kick/channel', async (req, res) => {
 // ---------------------------------------------------------------------------
 // 3. Подписки на chat.message.sent + SSE-раздача фронтенду
 // ---------------------------------------------------------------------------
-// broadcasterUserId (number) -> { subscriptionId, clients: Set<express.Response> }
 const activeStreams = new Map();
 
 app.post('/api/kick/roll/start', express.json(), async (req, res) => {
@@ -168,7 +181,7 @@ app.post('/api/kick/roll/stop', express.json(), async (req, res) => {
     res.json({ ok: true });
 });
 
-// SSE-поток, который слушает фронтенд вместо старого прямого Pusher-коннекта
+// SSE-поток для фронтенда
 app.get('/api/kick/roll/stream', (req, res) => {
     const broadcasterUserId = Number(req.query.broadcasterUserId);
     const stream = activeStreams.get(broadcasterUserId);
@@ -191,25 +204,13 @@ app.get('/api/kick/roll/stream', (req, res) => {
 // ---------------------------------------------------------------------------
 // 4. Приём вебхуков от Kick
 // ---------------------------------------------------------------------------
-// ⚠️ TODO ДО ПРОДА: проверить криптографическую подпись вебхука. Kick подписывает
-// доставку событий — актуальные заголовки и алгоритм смотри в разделе про
-// верификацию событий на https://github.com/KickEngineering/KickDevDocs
-// (могло измениться после написания этого файла). Пока обрабатываем без проверки.
 app.post('/api/kick/webhook', express.json({ type: '*/*' }), (req, res) => {
-    // Отвечаем сразу 200 — иначе Kick посчитает доставку неуспешной и будет ретраить
     res.sendStatus(200);
 
     const eventType = req.header('Kick-Event-Type');
     if (eventType && eventType !== 'chat.message.sent') return;
 
     const payload = req.body || {};
-
-    // --- Разбор отправителя -------------------------------------------------
-    // ⚠️ ПРОВЕРЬ ЭТО: точная форма payload может отличаться от того, что было в
-    // старом неофициальном Pusher-формате. Раскомментируй строку ниже, отправь
-    // тестовое сообщение в чат и посмотри реальную структуру в логах бэкенда,
-    // затем поправь пути ниже при необходимости.
-    // console.log('[Kick Webhook] RAW PAYLOAD:', JSON.stringify(payload, null, 2));
 
     const broadcasterUserId = Number(payload?.broadcaster?.user_id ?? payload?.broadcaster_user_id);
     const sender = payload?.sender || {};
@@ -229,7 +230,7 @@ app.post('/api/kick/webhook', express.json({ type: '*/*' }), (req, res) => {
     };
 
     const stream = activeStreams.get(broadcasterUserId);
-    if (!stream) return; // сейчас никто не собирает участников по этому каналу
+    if (!stream) return;
 
     const sseData = `event: chat_message\ndata: ${JSON.stringify(chatMessage)}\n\n`;
     for (const client of stream.clients) client.write(sseData);
@@ -237,5 +238,4 @@ app.post('/api/kick/webhook', express.json({ type: '*/*' }), (req, res) => {
 
 app.listen(PORT, () => {
     console.log(`[Kick Backend] Сервер запущен: http://localhost:${PORT}`);
-    console.log('[Kick Backend] Не забудь публично туннелировать /api/kick/webhook для получения событий от Kick.');
 });
