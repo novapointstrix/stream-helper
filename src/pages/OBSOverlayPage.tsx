@@ -6,18 +6,20 @@ import { getBonusesByStreamId, getStreamById } from '../services/bonusService';
 import { calculateMetrics, formatCurrency, formatMultiplier } from '../lib/utils';
 import { getThemeCssVariables } from '../lib/themeUtils';
 import { AutoScrollList } from '../components/overlay/AutoScrollList';
+import { StreamIconRenderer } from '../components/StreamIconRenderer';
 
 export const OBSOverlayPage: React.FC = () => {
   const { id: urlStreamId } = useParams<{ id: string }>();
   const [searchParams] = useSearchParams();
   const token = searchParams.get('token');
 
+  const [userId, setUserId] = useState<string | null>(null);
   const [streamId, setStreamId] = useState<string | null>(urlStreamId || null);
   const [stream, setStream] = useState<Stream | null>(null);
   const [bonuses, setBonuses] = useState<BonusBuy[]>([]);
+  const [streamIcon, setStreamIcon] = useState<string>('burger');
   const [fireImgError, setFireImgError] = useState(false);
 
-  // Жесткая глобальная блокировка скролла для страницы
   useEffect(() => {
     const preventScroll = (e: Event) => e.preventDefault();
 
@@ -53,15 +55,18 @@ export const OBSOverlayPage: React.FC = () => {
     try {
       let targetId = urlStreamId;
 
-      // Если в URL передан obs_token, ищем актуальную сессию этого конкретного пользователя
       if (token) {
         const { data: profileData } = await supabase
           .from('profiles')
-          .select('id')
+          .select('id, stream_icon')
           .eq('obs_token', token)
           .maybeSingle();
 
         if (profileData) {
+          setUserId(profileData.id);
+          if (profileData.stream_icon) {
+            setStreamIcon(profileData.stream_icon);
+          }
           const { data: userStream } = await supabase
             .from('streams')
             .select('id')
@@ -76,17 +81,25 @@ export const OBSOverlayPage: React.FC = () => {
         }
       }
 
-      // Если нет ни токена, ни параметра ID — берем последнюю общую сессию
       if (!targetId) {
         const { data: latestStream } = await supabase
           .from('streams')
-          .select('id')
+          .select('id, user_id')
           .order('created_at', { ascending: false })
           .limit(1)
           .maybeSingle();
 
         if (latestStream) {
           targetId = latestStream.id;
+          if (latestStream.user_id) {
+            setUserId(latestStream.user_id);
+            const { data: profile } = await supabase
+              .from('profiles')
+              .select('stream_icon')
+              .eq('id', latestStream.user_id)
+              .maybeSingle();
+            if (profile?.stream_icon) setStreamIcon(profile.stream_icon);
+          }
         }
       }
 
@@ -110,10 +123,9 @@ export const OBSOverlayPage: React.FC = () => {
     loadData();
   }, [loadData]);
 
+  // Подписка на обновление данных стрима и покупку бонусов
   useEffect(() => {
     if (!streamId) return;
-
-    let reconnectTimer: ReturnType<typeof setTimeout>;
 
     const channel = supabase
       .channel(`obs_overlay_realtime_${streamId}`)
@@ -125,24 +137,10 @@ export const OBSOverlayPage: React.FC = () => {
           table: 'bonus_buys',
           filter: `stream_id=eq.${streamId}`,
         },
-        (payload) => {
-          if (payload.eventType === 'INSERT') {
-            const newBonus = normalizeBonus(payload.new);
-            setBonuses((prev) => {
-              if (prev.some((b) => b.id === newBonus.id)) return prev;
-              return [newBonus, ...prev];
-            });
-          } else if (payload.eventType === 'UPDATE') {
-            const updatedBonus = normalizeBonus(payload.new);
-            setBonuses((prev) =>
-              prev.map((item) => (item.id === updatedBonus.id ? { ...item, ...updatedBonus } : item))
-            );
-          } else if (payload.eventType === 'DELETE') {
-            const deletedId = payload.old?.id;
-            if (deletedId) {
-              setBonuses((prev) => prev.filter((item) => item.id !== deletedId));
-            }
-          }
+        () => {
+          getBonusesByStreamId(streamId).then((raw) => {
+            setBonuses((raw || []).map(normalizeBonus));
+          });
         }
       )
       .on(
@@ -159,23 +157,39 @@ export const OBSOverlayPage: React.FC = () => {
           }
         }
       )
-      .subscribe((status, err) => {
-        if (err) {
-          console.error('Realtime subscription error:', err);
-        }
-
-        if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
-          reconnectTimer = setTimeout(() => {
-            channel.subscribe();
-          }, 3000);
-        }
-      });
+      .subscribe();
 
     return () => {
-      if (reconnectTimer) clearTimeout(reconnectTimer);
       supabase.removeChannel(channel);
     };
   }, [streamId]);
+
+  // Подписка на изменение иконки в профиле
+  useEffect(() => {
+    if (!userId) return;
+
+    const profileChannel = supabase
+      .channel(`obs_overlay_profile_${userId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'profiles',
+          filter: `id=eq.${userId}`,
+        },
+        (payload) => {
+          if (payload.new && (payload.new as any).stream_icon) {
+            setStreamIcon((payload.new as any).stream_icon);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(profileChannel);
+    };
+  }, [userId]);
 
   const metrics = calculateMetrics(bonuses);
 
@@ -215,26 +229,12 @@ export const OBSOverlayPage: React.FC = () => {
         className="fixed inset-0 w-full h-full bg-[var(--widget-bg,#0d0305)] text-[var(--widget-text-primary,#ffffff)] font-sans flex flex-col justify-center items-center overflow-hidden select-none"
       >
         <div className="w-[1100px] h-[1100px] bg-[var(--widget-bg,#0d0305)] rounded-none p-10 flex flex-col gap-5 box-border">
-          {/* Шапка */}
+          {/* Шапка с реактивно обновляемой иконкой */}
           <div className="flex items-center justify-between border-b-2 border-[var(--widget-border,rgba(255,255,255,0.15))] pb-4">
             <div className="flex items-center gap-4 min-w-0 pr-4">
-              {/* Векторная SVG иконка бургера */}
-              <svg className="w-16 h-16 shrink-0 drop-shadow-md" viewBox="0 0 50 50">
-                <g transform="translate(25, 25)">
-                  <path d="M -18,-2 A 18 18 0 0 1 18,-2 Z" fill="#E28743" />
-                  <g fill="#FFF8E7">
-                    <ellipse cx="-8" cy="-10" rx="1.3" ry="0.7" transform="rotate(45 -8 -10)" />
-                    <ellipse cx="0" cy="-13" rx="1.3" ry="0.7" transform="rotate(45 0 -13)" />
-                    <ellipse cx="8" cy="-9" rx="1.3" ry="0.7" transform="rotate(45 8 -9)" />
-                    <ellipse cx="-4" cy="-6" rx="1.3" ry="0.7" transform="rotate(45 -4 -6)" />
-                    <ellipse cx="4" cy="-5" rx="1.3" ry="0.7" transform="rotate(45 4 -5)" />
-                  </g>
-                  <rect x="-19" y="-2" width="38" height="4" rx="2" fill="#48BB78" />
-                  <path d="M -18,2 L 18,2 L 18,6 L 10,6 L 6,11 L 2,6 L -18,6 Z" fill="#ECC94B" />
-                  <rect x="-18" y="6" width="36" height="6" rx="3" fill="#633211" />
-                  <path d="M -17,12 L 17,12 A 3 3 0 0 1 17,17 L -17,17 A 3 3 0 0 1 -17,12 Z" fill="#C8702E" />
-                </g>
-              </svg>
+              <div className="shrink-0 flex items-center justify-center">
+                <StreamIconRenderer iconId={streamIcon} size={48} />
+              </div>
 
               <div className="min-w-0 max-w-[650px] flex flex-col justify-center">
                 <div className="flex items-center gap-3">
