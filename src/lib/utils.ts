@@ -1,61 +1,67 @@
-import { BonusBuy } from '../types/database.types';
+import { BonusBuy, StreamMetrics } from '../types/database.types';
 
-export function formatCurrency(value: number | null | undefined): string {
-  if (value === null || value === undefined) return '$0';
-  return `$${value.toLocaleString('en-US')}`;
+export function formatCurrency(amount: number | null | undefined): string {
+  if (amount === null || amount === undefined || isNaN(amount)) return '—';
+  return new Intl.NumberFormat('ru-RU', {
+    style: 'currency',
+    currency: 'RUB',
+    maximumFractionDigits: 0,
+  }).format(amount);
 }
 
-export function formatMultiplier(value: number | null | undefined): string {
-  if (value === null || value === undefined) return '0.00x';
-  return `${value.toFixed(2)}x`;
+export function formatMultiplier(mult: number | null | undefined): string {
+  if (mult === null || mult === undefined || isNaN(mult)) return '—';
+  return `${mult.toFixed(2)}x`;
 }
 
-export interface MetricsResult {
-  totalSpent: number;
-  totalWin: number;
-  totalBuys: number;
-  avgMultiplier: number;
-  bestX: BonusBuy | null;
-  bestWin: BonusBuy | null;
-}
+export function calculateMetrics(bonuses: BonusBuy[]): StreamMetrics {
+  const completed = bonuses.filter((b) => b.status === 'completed');
+  
+  const totalSpent = bonuses
+    .filter((b) => b.status !== 'cancelled')
+    .reduce((acc, b) => acc + (b.buy_amount || 0), 0);
 
-export function calculateMetrics(bonuses: BonusBuy[]): MetricsResult {
-  let totalSpent = 0;
-  let totalWin = 0;
-  let completedCount = 0;
+  const totalWin = completed.reduce((acc, b) => acc + (b.win_amount || 0), 0);
+  const profit = totalWin - totalSpent;
 
-  let bestX: BonusBuy | null = null;
-  let bestWin: BonusBuy | null = null;
+  const validMultipliers = completed
+    .map((b) => b.multiplier)
+    .filter((m): m is number => m !== null && !isNaN(m));
 
-  for (const b of bonuses) {
-    const buy = Number(b.buy_amount) || 0;
-    totalSpent += buy;
+  const avgMultiplier =
+    validMultipliers.length > 0
+      ? validMultipliers.reduce((a, b) => a + b, 0) / validMultipliers.length
+      : 0;
 
-    if (b.win_amount !== null && b.win_amount !== undefined) {
-      const win = Number(b.win_amount);
-      totalWin += win;
-      completedCount++;
+  let bestX: StreamMetrics['bestX'] = null;
+  let bestWin: StreamMetrics['bestWin'] = null;
 
-      // Лучший X
-      if (b.multiplier !== null && b.multiplier !== undefined) {
-        if (!bestX || (bestX.multiplier !== null && b.multiplier > bestX.multiplier)) {
-          bestX = b;
-        }
-      }
+  if (completed.length > 0) {
+    const sortedByX = [...completed].sort((a, b) => (b.multiplier || 0) - (a.multiplier || 0));
+    const sortedByWin = [...completed].sort((a, b) => (b.win_amount || 0) - (a.win_amount || 0));
 
-      // Лучший выигрыш
-      if (!bestWin || (bestWin.win_amount !== null && win > Number(bestWin.win_amount))) {
-        bestWin = b;
-      }
+    if (sortedByX[0] && sortedByX[0].multiplier !== null) {
+      bestX = { 
+        multiplier: sortedByX[0].multiplier, 
+        slot_name: sortedByX[0].slot_name,
+        player: sortedByX[0].provider || 'Игрок'
+      };
+    }
+    if (sortedByWin[0] && sortedByWin[0].win_amount !== null) {
+      bestWin = { 
+        amount: sortedByWin[0].win_amount, 
+        slot_name: sortedByWin[0].slot_name,
+        player: sortedByWin[0].provider || 'Игрок'
+      };
     }
   }
 
-  const avgMultiplier = completedCount > 0 && totalSpent > 0 ? totalWin / totalSpent : 0;
-
   return {
+    totalBuys: bonuses.length,
+    completedBuys: completed.length,
     totalSpent,
     totalWin,
-    totalBuys: bonuses.length,
+    profit,
     avgMultiplier,
     bestX,
     bestWin,

@@ -1,392 +1,138 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { useParams, useSearchParams } from 'react-router-dom';
-import { supabase } from '../lib/supabaseClient';
+import React, { useEffect, useState } from 'react';
+import { useParams } from 'react-router-dom';
+import { broadcast } from '../lib/broadcast';
 import { BonusBuy, Stream } from '../types/database.types';
 import { getBonusesByStreamId, getStreamById } from '../services/bonusService';
 import { calculateMetrics, formatCurrency, formatMultiplier } from '../lib/utils';
-import { getThemeCssVariables } from '../lib/themeUtils';
 import { AutoScrollList } from '../components/overlay/AutoScrollList';
-import { StreamIconRenderer } from '../components/StreamIconRenderer';
+import { Crown, Flame, Zap } from 'lucide-react';
 
 export const OBSOverlayPage: React.FC = () => {
-  const { id: urlStreamId } = useParams<{ id: string }>();
-  const [searchParams] = useSearchParams();
-  const token = searchParams.get('token');
-
-  const [userId, setUserId] = useState<string | null>(null);
-  const [streamId, setStreamId] = useState<string | null>(urlStreamId || null);
+  const { streamId } = useParams<{ streamId: string }>();
   const [stream, setStream] = useState<Stream | null>(null);
   const [bonuses, setBonuses] = useState<BonusBuy[]>([]);
-  const [streamIcon, setStreamIcon] = useState<string>('burger');
-  const [fireImgError, setFireImgError] = useState(false);
 
-  useEffect(() => {
-    const preventScroll = (e: Event) => e.preventDefault();
-
-    window.addEventListener('wheel', preventScroll, { passive: false });
-    window.addEventListener('touchmove', preventScroll, { passive: false });
-
-    const originalBodyOverflow = document.body.style.overflow;
-    const originalHtmlOverflow = document.documentElement.style.overflow;
-
-    document.body.style.overflow = 'hidden';
-    document.documentElement.style.overflow = 'hidden';
-
-    return () => {
-      window.removeEventListener('wheel', preventScroll);
-      window.removeEventListener('touchmove', preventScroll);
-      document.body.style.overflow = originalBodyOverflow;
-      document.documentElement.style.overflow = originalHtmlOverflow;
-    };
-  }, []);
-
-  const normalizeBonus = (item: any): BonusBuy => {
-    const cost = Number(item.buy_cost ?? item.buy_amount ?? 0);
-    return {
-      ...item,
-      buy_cost: cost,
-      buy_amount: cost,
-      win_amount: Number(item.win_amount ?? 0),
-      multiplier: Number(item.multiplier ?? 0),
-    };
+  const loadData = async () => {
+    if (!streamId) return;
+    const st = await getStreamById(streamId);
+    setStream(st);
+    const data = await getBonusesByStreamId(streamId);
+    setBonuses(data);
   };
-
-  const loadData = useCallback(async () => {
-    try {
-      let targetId = urlStreamId;
-
-      if (token) {
-        const { data: profileData } = await supabase
-          .from('profiles')
-          .select('id, stream_icon')
-          .eq('obs_token', token)
-          .maybeSingle();
-
-        if (profileData) {
-          setUserId(profileData.id);
-          if (profileData.stream_icon) {
-            setStreamIcon(profileData.stream_icon);
-          }
-          const { data: userStream } = await supabase
-            .from('streams')
-            .select('id')
-            .eq('user_id', profileData.id)
-            .order('created_at', { ascending: false })
-            .limit(1)
-            .maybeSingle();
-
-          if (userStream) {
-            targetId = userStream.id;
-          }
-        }
-      }
-
-      if (!targetId) {
-        const { data: latestStream } = await supabase
-          .from('streams')
-          .select('id, user_id')
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-
-        if (latestStream) {
-          targetId = latestStream.id;
-          if (latestStream.user_id) {
-            setUserId(latestStream.user_id);
-            const { data: profile } = await supabase
-              .from('profiles')
-              .select('stream_icon')
-              .eq('id', latestStream.user_id)
-              .maybeSingle();
-            if (profile?.stream_icon) setStreamIcon(profile.stream_icon);
-          }
-        }
-      }
-
-      if (!targetId) return;
-      setStreamId(targetId);
-
-      const [st, rawBonuses] = await Promise.all([
-        getStreamById(targetId),
-        getBonusesByStreamId(targetId),
-      ]);
-      setStream(st);
-
-      const normalized = (rawBonuses || []).map(normalizeBonus);
-      setBonuses(normalized);
-    } catch (err) {
-      console.error('Error loading OBS overlay data:', err);
-    }
-  }, [urlStreamId, token]);
 
   useEffect(() => {
     loadData();
-  }, [loadData]);
 
-  // Подписка на обновление данных стрима и покупку бонусов
-  useEffect(() => {
-    if (!streamId) return;
-
-    const channel = supabase
-      .channel(`obs_overlay_realtime_${streamId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'bonus_buys',
-          filter: `stream_id=eq.${streamId}`,
-        },
-        () => {
-          getBonusesByStreamId(streamId).then((raw) => {
-            setBonuses((raw || []).map(normalizeBonus));
-          });
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'streams',
-          filter: `id=eq.${streamId}`,
-        },
-        (payload) => {
-          if (payload.new) {
-            setStream(payload.new as Stream);
-          }
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
+    const handleBroadcast = (e: MessageEvent) => {
+      if (e.data?.type === 'UPDATE_STREAM' && e.data?.streamId === streamId) loadData();
     };
+    broadcast.addEventListener('message', handleBroadcast);
+    return () => broadcast.removeEventListener('message', handleBroadcast);
   }, [streamId]);
-
-  // Подписка на изменение иконки в профиле
-  useEffect(() => {
-    if (!userId) return;
-
-    const profileChannel = supabase
-      .channel(`obs_overlay_profile_${userId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'profiles',
-          filter: `id=eq.${userId}`,
-        },
-        (payload) => {
-          if (payload.new && (payload.new as any).stream_icon) {
-            setStreamIcon((payload.new as any).stream_icon);
-          }
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(profileChannel);
-    };
-  }, [userId]);
 
   const metrics = calculateMetrics(bonuses);
 
-  const themeId =
-    (stream as any)?.widget_style ||
-    (stream as any)?.default_widget_style ||
-    (stream as any)?.theme_id ||
-    'classic';
-
-  const themeStyles = getThemeCssVariables(themeId, (stream as any)?.custom_tokens);
-
   return (
-    <>
-      <style>{`
-        html, body, #root {
-          overflow: hidden !important;
-          margin: 0 !important;
-          padding: 0 !important;
-          width: 100vw !important;
-          height: 100vh !important;
-          position: fixed !important;
-          top: 0 !important;
-          left: 0 !important;
-        }
-        *, *::before, *::after {
-          scrollbar-width: none !important;
-          -ms-overflow-style: none !important;
-        }
-        ::-webkit-scrollbar {
-          display: none !important;
-          width: 0 !important;
-          height: 0 !important;
-        }
-      `}</style>
-      <div
-        style={themeStyles as React.CSSProperties}
-        className="fixed inset-0 w-full h-full bg-[var(--widget-bg,#0d0305)] text-[var(--widget-text-primary,#ffffff)] font-sans flex flex-col justify-center items-center overflow-hidden select-none"
-      >
-        <div className="w-[1100px] h-[1100px] bg-[var(--widget-bg,#0d0305)] rounded-none p-10 flex flex-col gap-5 box-border">
-          {/* Шапка с реактивно обновляемой иконкой */}
-          <div className="flex items-center justify-between border-b-2 border-[var(--widget-border,rgba(255,255,255,0.15))] pb-4">
-            <div className="flex items-center gap-4 min-w-0 pr-4">
-              <div className="shrink-0 flex items-center justify-center">
-                <StreamIconRenderer iconId={streamIcon} size={48} />
+    <div className="w-[1000px] h-[1000px] bg-transparent text-white font-sans p-2 flex flex-col justify-center items-center overflow-hidden select-none">
+      <div className="w-[1000px] h-[1000px] bg-[#120507]/90 rounded-3xl p-6 flex flex-col gap-5 box-border border-2 border-red-900/40">
+        
+        {/* Шапка с бургером 🍔 и блоком ⭐ Куплено в 1 ряд */}
+        <div className="flex items-center justify-between border-b-2 border-red-800/40 pb-4">
+          <div className="flex items-center gap-4">
+            <span className="text-6xl">🍔</span>
+            <div>
+              <div className="flex items-center gap-3">
+                <span className="w-5 h-5 rounded-full bg-red-600 animate-pulse shadow-[0_0_20px_#dc2626]" />
+                <h1 className="text-4xl font-black text-white uppercase tracking-widest">
+                  BONUS BUY #{stream?.stream_number || 127}
+                </h1>
               </div>
-
-              <div className="min-w-0 max-w-[650px] flex flex-col justify-center">
-                <div className="flex items-center gap-3">
-                  <h1 className="text-4xl font-bold text-[var(--widget-text-primary,#ffffff)] uppercase tracking-widest truncate">
-                    BONUS BUY #{stream?.stream_number || 1}
-                  </h1>
-                </div>
-                <p className="text-xl font-medium text-[var(--widget-text-secondary,rgba(255,255,255,0.6))] mt-1 uppercase tracking-wider truncate">
-                  {stream?.title || 'БОНУС ЗАНОС'}
-                </p>
-              </div>
-            </div>
-
-            <div
-              style={{
-                backgroundColor: 'var(--widget-surface)',
-                borderColor: 'rgba(255, 255, 255, 0.15)',
-              }}
-              className="rounded-2xl px-6 py-3.5 flex items-center gap-3 shrink-0 border"
-            >
-              <img src="/icons/star.png" alt="Star" className="w-8 h-8 object-contain" />
-              <span className="text-2xl font-bold text-[var(--widget-text-secondary,rgba(255,255,255,0.7))] uppercase tracking-wider">
-                КУПЛЕНО
-              </span>
-              <span className="text-4xl font-bold text-[var(--widget-text-primary,#ffffff)] leading-none ml-1">
-                {metrics.totalBuys}
-              </span>
+              <p className="text-xl font-extrabold text-red-300 mt-1 uppercase tracking-wider">
+                {stream?.title || 'ОХОТА ЗА X1000'}
+              </p>
             </div>
           </div>
 
-          {/* Метрики */}
-          <div className="grid grid-cols-3 gap-3">
-            <div
-              style={{
-                backgroundColor: 'var(--widget-surface)',
-                borderColor: 'rgba(255, 255, 255, 0.12)',
-              }}
-              className="border rounded-2xl p-3.5 flex items-center gap-3.5"
-            >
-              <img src="/icons/money.png" alt="Spent" className="w-14 h-14 object-contain shrink-0" />
-              <div className="min-w-0">
-                <div className="text-base font-normal text-[var(--widget-text-secondary)] uppercase tracking-wider">
-                  Затрачено
-                </div>
-                <div className="text-4xl font-bold text-[var(--widget-text-primary,#ffffff)] mt-0.5 truncate">
-                  {formatCurrency(metrics.totalSpent)}
-                </div>
-              </div>
-            </div>
-
-            <div
-              style={{
-                backgroundColor: 'var(--widget-surface)',
-                borderColor: 'rgba(255, 255, 255, 0.12)',
-              }}
-              className="border rounded-2xl p-3.5 flex items-center gap-3.5"
-            >
-              <img src="/icons/win.png" alt="Win" className="w-14 h-14 object-contain shrink-0" />
-              <div className="min-w-0">
-                <div className="text-base font-normal text-[var(--widget-text-secondary)] uppercase tracking-wider">
-                  Выигрыш
-                </div>
-                <div className="text-4xl font-bold text-[var(--widget-positive,#10b981)] mt-0.5 truncate">
-                  {formatCurrency(metrics.totalWin)}
-                </div>
-              </div>
-            </div>
-
-            <div
-              style={{
-                backgroundColor: 'var(--widget-surface)',
-                borderColor: 'rgba(255, 255, 255, 0.12)',
-              }}
-              className="border rounded-2xl p-3.5 flex items-center gap-3.5"
-            >
-              <img src="/icons/lightning.png" alt="Avg Multiplier" className="w-14 h-14 object-contain shrink-0" />
-              <div className="min-w-0">
-                <div className="text-base font-normal text-[var(--widget-text-secondary)] uppercase tracking-wider">
-                  Средний X
-                </div>
-                <div className="text-4xl font-bold text-[var(--widget-text-primary,#ffffff)] mt-0.5 truncate">
-                  {formatMultiplier(metrics.avgMultiplier)}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Рекорды */}
-          <div className="grid grid-cols-2 gap-4">
-            <div
-              style={{
-                backgroundColor: 'var(--widget-surface)',
-                borderColor: 'rgba(255, 255, 255, 0.15)',
-              }}
-              className="border rounded-2xl p-4 flex items-center justify-between"
-            >
-              <div className="flex items-center gap-4 min-w-0 pr-2">
-                <img src="/icons/crown.png" alt="Crown" className="w-14 h-10 object-contain shrink-0" />
-                <div className="min-w-0 max-w-[260px]">
-                  <div className="text-3xl text-[var(--widget-text-primary,#ffffff)] font-bold truncate">
-                    {metrics.bestX?.slot_name || '—'}
-                  </div>
-                  <div className="text-2xl text-[var(--widget-text-secondary)] font-normal truncate">
-                    {(metrics.bestX as any)?.provider || metrics.bestX?.player || '—'}
-                  </div>
-                </div>
-              </div>
-              <div className="text-5xl font-bold text-[var(--widget-accent)] shrink-0">
-                {metrics.bestX ? formatMultiplier(metrics.bestX.multiplier) : '—'}
-              </div>
-            </div>
-
-            <div
-              style={{
-                backgroundColor: 'var(--widget-surface)',
-                borderColor: 'rgba(255, 255, 255, 0.15)',
-              }}
-              className="border rounded-2xl p-4 flex items-center justify-between"
-            >
-              <div className="flex items-center gap-4 min-w-0 pr-2">
-                {!fireImgError ? (
-                  <img
-                    src="/icons/fire.png"
-                    alt="Flame"
-                    className="w-12 h-12 object-contain shrink-0"
-                    onError={() => setFireImgError(true)}
-                  />
-                ) : (
-                  <svg className="w-12 h-12 text-[var(--widget-accent)] shrink-0" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M12 23c-4.97 0-9-3.58-9-8 0-4.19 3.58-8.86 7.27-12.53.4-.4 1.06-.4 1.46 0C15.42 6.14 19 10.81 19 15c0 4.42-4.03 8-9 8zm1.25-17.84C10.02 8.48 5 12.72 5 15c0 3.31 3.13 6 7 6s7-2.69 7-6c0-2.28-5.02-6.52-8.25-9.84z" />
-                  </svg>
-                )}
-                <div className="min-w-0 max-w-[240px]">
-                  <div className="text-3xl text-[var(--widget-text-primary,#ffffff)] font-bold truncate">
-                    {metrics.bestWin?.slot_name || '—'}
-                  </div>
-                  <div className="text-2xl text-[var(--widget-text-secondary)] font-normal truncate">
-                    {(metrics.bestWin as any)?.provider || metrics.bestWin?.player || '—'}
-                  </div>
-                </div>
-              </div>
-              <div className="text-5xl font-bold text-[var(--widget-positive,#10b981)] shrink-0">
-                {metrics.bestWin ? formatCurrency((metrics.bestWin as any).win_amount ?? metrics.bestWin.amount) : '—'}
-              </div>
-            </div>
-          </div>
-
-          <div className="flex-1 flex flex-col min-h-0">
-            <AutoScrollList bonuses={bonuses} activeBonusId={stream?.active_bonus_id} speedPxPerSec={18} />
+          {/* Плашка "⭐ Куплено 5" в один ряд */}
+          <div className="bg-red-950/90 border-2 border-red-600/60 rounded-2xl px-6 py-3.5 flex items-center gap-3 shadow-[0_0_25px_rgba(220,38,38,0.35)]">
+            <span className="text-3xl">⭐</span>
+            <span className="text-2xl font-black text-red-200 uppercase tracking-wider">Куплено</span>
+            <span className="text-4xl font-black text-white leading-none ml-1">{metrics.totalBuys}</span>
           </div>
         </div>
+
+        {/* 4 Карточки Метрик (Увеличены текст и иконки в 1.4 раза) */}
+        <div className="grid grid-cols-4 gap-3">
+          <div className="bg-[#1a080a]/95 border-2 border-red-800/40 rounded-2xl p-3.5 flex items-center gap-3.5">
+            <span className="text-5xl">💸</span>
+            <div>
+              <div className="text-base font-black text-red-300/70 uppercase tracking-wider">Затрачено</div>
+              <div className="text-2xl font-black text-white mt-0.5">{formatCurrency(metrics.totalSpent)}</div>
+            </div>
+          </div>
+
+          <div className="bg-[#1a080a]/95 border-2 border-red-800/40 rounded-2xl p-3.5 flex items-center gap-3.5">
+            <span className="text-5xl">💰</span>
+            <div>
+              <div className="text-base font-black text-red-300/70 uppercase tracking-wider">Выигрыш</div>
+              <div className="text-2xl font-black text-emerald-400 mt-0.5">{formatCurrency(metrics.totalWin)}</div>
+            </div>
+          </div>
+
+          <div className="bg-[#1a080a]/95 border-2 border-red-800/40 rounded-2xl p-3.5 flex items-center gap-3.5">
+            <span className="text-5xl">📈</span>
+            <div>
+              <div className="text-base font-black text-red-300/70 uppercase tracking-wider">Профит</div>
+              <div className={`text-2xl font-black mt-0.5 ${metrics.profit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
+                {metrics.profit > 0 ? '+' : ''}{formatCurrency(metrics.profit)}
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-[#1a080a]/95 border-2 border-red-800/40 rounded-2xl p-3.5 flex items-center gap-3.5">
+            <span className="text-5xl">⚡</span>
+            <div>
+              <div className="text-base font-black text-red-300/70 uppercase tracking-wider">Средний X</div>
+              <div className="text-2xl font-black text-amber-400 mt-0.5">{formatMultiplier(metrics.avgMultiplier)}</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Топовый икс и Топовый выигрыш c никнеймом игрока */}
+        <div className="grid grid-cols-2 gap-4">
+          <div className="bg-gradient-to-r from-red-950/90 to-[#1d090c]/90 border-2 border-amber-500/50 rounded-2xl p-4 flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <Crown className="text-amber-400" size={48} />
+              <div>
+                <div className="text-sm font-black text-amber-300/80 uppercase tracking-wider">Топовый Икс</div>
+                <div className="text-2xl text-white font-black">{metrics.bestX?.slot_name || '—'}</div>
+                <div className="text-lg text-amber-300 font-extrabold">{metrics.bestX?.player || '—'}</div>
+              </div>
+            </div>
+            <div className="text-5xl font-black text-amber-400">{metrics.bestX ? formatMultiplier(metrics.bestX.multiplier) : '—'}</div>
+          </div>
+
+          <div className="bg-gradient-to-r from-red-950/90 to-[#1d090c]/90 border-2 border-emerald-500/50 rounded-2xl p-4 flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <Flame className="text-emerald-400" size={48} />
+              <div>
+                <div className="text-sm font-black text-emerald-300/80 uppercase tracking-wider">Топовый Выигрыш</div>
+                <div className="text-2xl text-white font-black">{metrics.bestWin?.slot_name || '—'}</div>
+                <div className="text-lg text-emerald-300 font-extrabold">{metrics.bestWin?.player || '—'}</div>
+              </div>
+            </div>
+            <div className="text-5xl font-black text-emerald-400">{metrics.bestWin ? formatCurrency(metrics.bestWin.amount) : '—'}</div>
+          </div>
+        </div>
+
+        {/* Список автоскролла */}
+        <div className="flex-1 flex flex-col min-h-0">
+          <div className="text-xl font-black text-red-200 uppercase tracking-wider mb-2 flex items-center gap-2">
+            <Zap size={28} className="text-red-500" /> Лайв Лента Бонусок
+          </div>
+          <AutoScrollList bonuses={bonuses} activeBonusId={stream?.active_bonus_id} speedPxPerSec={18} />
+        </div>
       </div>
-    </>
+    </div>
   );
 };

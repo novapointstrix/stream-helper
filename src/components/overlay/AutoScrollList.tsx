@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useMemo } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { BonusBuy } from '../../types/database.types';
 import { formatCurrency, formatMultiplier } from '../../lib/utils';
 import { Play } from 'lucide-react';
@@ -9,296 +9,122 @@ interface Props {
   speedPxPerSec?: number;
 }
 
-const MIN_SCROLL_COUNT = 4;
-
-export const AutoScrollList: React.FC<Props> = ({ bonuses, activeBonusId, speedPxPerSec = 18 }) => {
+export const AutoScrollList: React.FC<Props> = ({ bonuses, activeBonusId, speedPxPerSec = 15 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
-  const scrollPosRef = useRef<number>(0);
 
-  const activeBonus = useMemo(
-    () => bonuses.find((b) => b.id === activeBonusId || b.status === 'playing'),
-    [bonuses, activeBonusId]
-  );
+  const activeBonus = bonuses.find((b) => b.id === activeBonusId || b.status === 'playing');
+  const regularBonuses = bonuses.filter((b) => b.id !== activeBonus?.id);
 
-  const activeBonusIndex = useMemo(() => {
-    if (!activeBonus) return 0;
-    if (activeBonus.slot_number != null) return activeBonus.slot_number;
-    if (activeBonus.position != null) return activeBonus.position;
-    const idx = bonuses.findIndex((b) => b.id === activeBonus.id);
-    return idx !== -1 ? idx + 1 : 1;
-  }, [bonuses, activeBonus]);
-
-  const regularBonusesWithIndex = useMemo(() => {
-    return bonuses
-      .map((item, originalIndex) => ({
-        ...item,
-        displayIndex: item.slot_number ?? item.position ?? originalIndex + 1,
-      }))
-      .filter((b) => b.id !== activeBonus?.id);
-  }, [bonuses, activeBonus]);
-
-  const displayBonuses = useMemo(() => {
-    if (regularBonusesWithIndex.length < MIN_SCROLL_COUNT) {
-      return regularBonusesWithIndex;
-    }
-    return [...regularBonusesWithIndex, ...regularBonusesWithIndex];
-  }, [regularBonusesWithIndex]);
-
-  // Анимация скролла
   useEffect(() => {
+    const container = containerRef.current;
     const content = contentRef.current;
-    if (!content || displayBonuses.length === 0) return;
+    if (!container || !content) return;
 
     let animationFrameId: number;
-    let lastTime = performance.now();
+    let currentScroll = 0;
 
-    const scroll = (currentTime: number) => {
-      const deltaTime = Math.min((currentTime - lastTime) / 1000, 0.05);
-      lastTime = currentTime;
-
-      const isOverflowing = content.scrollHeight / 2 > (containerRef.current?.clientHeight || 0);
-      const shouldScroll = regularBonusesWithIndex.length >= MIN_SCROLL_COUNT && isOverflowing;
-
-      if (shouldScroll) {
-        const halfHeight = content.scrollHeight / 2;
-
-        if (halfHeight > 0) {
-          scrollPosRef.current += speedPxPerSec * deltaTime;
-
-          if (scrollPosRef.current >= halfHeight) {
-            scrollPosRef.current -= halfHeight;
-          }
-
-          content.style.transform = `translate3d(0, -${scrollPosRef.current.toFixed(2)}px, 0)`;
+    const scroll = () => {
+      if (content.scrollHeight > container.clientHeight) {
+        currentScroll += speedPxPerSec / 60;
+        if (currentScroll >= content.scrollHeight / 2) {
+          currentScroll = 0;
         }
+        container.scrollTop = currentScroll;
       } else {
-        scrollPosRef.current = 0;
-        content.style.transform = 'translate3d(0, 0px, 0)';
+        container.scrollTop = 0;
       }
-
       animationFrameId = requestAnimationFrame(scroll);
     };
 
     animationFrameId = requestAnimationFrame(scroll);
+    return () => cancelAnimationFrame(animationFrameId);
+  }, [regularBonuses, speedPxPerSec]);
 
-    return () => {
-      cancelAnimationFrame(animationFrameId);
-    };
-  }, [displayBonuses.length, regularBonusesWithIndex.length, speedPxPerSec]);
+  const displayBonuses = regularBonuses.length > 3 ? [...regularBonuses, ...regularBonuses] : regularBonuses;
 
   return (
-    <div className="flex-1 flex flex-col gap-3 min-h-0 bg-[var(--widget-bg)] p-2 rounded-2xl transition-colors duration-300">
-      <style>{`
-        @keyframes livePulse {
-          0% {
-            transform: scale(0.95);
-            box-shadow: 0 0 0 0 rgba(255, 34, 34, 0.7);
-          }
-          70% {
-            transform: scale(1.15);
-            box-shadow: 0 0 0 8px rgba(255, 34, 34, 0);
-          }
-          100% {
-            transform: scale(0.95);
-            box-shadow: 0 0 0 0 rgba(255, 34, 34, 0);
-          }
-        }
-        .smooth-live-dot {
-          animation: livePulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-        }
-
-        .gpu-no-flicker {
-          -webkit-font-smoothing: antialiased;
-          -moz-osx-font-smoothing: grayscale;
-          backface-visibility: hidden;
-          -webkit-backface-visibility: hidden;
-          transform: translateZ(0);
-        }
-
-        /* Плавное притухание слотов при заезде под верхнюю область/активный слот */
-        .scroll-mask-top {
-          mask-image: linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.3) 15px, black 45px, black 100%);
-          -webkit-mask-image: linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.3) 15px, black 45px, black 100%);
-        }
-      `}</style>
-
-      {/* Активный слот (ТЕНЬ И СВЕЧЕНИЕ СОХРАНЕНЫ) */}
+    <div className="flex-1 flex flex-col gap-3 min-h-0">
+      {/* Активный слот */}
       {activeBonus && (
-        <div className="relative z-20 mt-0 mb-2 w-full">
-          <div
-            style={{
-              background: 'var(--widget-active-bg, var(--widget-surface-elevated, var(--widget-surface)))',
-              borderColor: 'rgba(255, 255, 255, 0.15)',
-              boxShadow: '0 12px 32px -4px rgba(0, 0, 0, 0.85)',
-            }}
-            className="gpu-no-flicker scale-100 border rounded-2xl px-6 py-4 flex items-center justify-between shrink-0 relative overflow-hidden transition-all duration-300"
-          >
-            {/* Акцентная полоса со свечением */}
-            <div
-              style={{ backgroundColor: 'var(--widget-accent)' }}
-              className="absolute left-0 top-0 bottom-0 w-1.5 shadow-[0_0_12px_var(--widget-accent)]"
-            />
-
-            {/* Левая часть */}
-            <div className="flex items-center gap-5 min-w-0 flex-1 pr-4">
-              <span
-                style={{
-                  color: 'var(--widget-accent)',
-                  backgroundColor: 'var(--widget-surface-secondary)',
-                  borderColor: 'rgba(255, 255, 255, 0.12)',
-                }}
-                className="text-xl font-semibold px-4 py-2 rounded-xl border flex items-center gap-2 shrink-0 shadow-sm"
-              >
-                <span>#{String(activeBonusIndex).padStart(2, '0')}</span>
-                <Play size={20} style={{ fill: 'var(--widget-accent)', color: 'var(--widget-accent)' }} />
-              </span>
-
-              <div className="min-w-0 max-w-[420px]">
-                <div style={{ color: 'var(--widget-text-primary)' }} className="text-4xl font-medium tracking-wide truncate">
-                  {activeBonus.slot_name}
-                </div>
-                <div style={{ color: 'var(--widget-text-secondary)' }} className="text-3xl font-normal mt-0.5 truncate">
-                  {activeBonus.provider || activeBonus.player_name || 'Игрок не указан'}
-                </div>
+        <div className="bg-gradient-to-r from-red-950/95 via-amber-950/90 to-red-950/95 border-2 border-amber-400 rounded-2xl px-6 py-4 flex items-center justify-between shadow-[0_0_35px_rgba(245,158,11,0.4)] animate-pulse">
+          <div className="flex items-center gap-5">
+            <span className="text-xl font-black text-amber-300 bg-amber-950/90 px-4 py-2 rounded-xl border border-amber-400/60 flex items-center gap-2">
+              <span className="text-amber-200">#{String(activeBonus.position).padStart(2, '0')}</span>
+              <Play size={24} className="fill-amber-300" /> ИГРАЕТ
+            </span>
+            <div>
+              <div className="text-3xl font-black text-white tracking-wide">
+                {activeBonus.slot_name}
               </div>
+              <div className="text-2xl text-amber-200 font-black mt-0.5">{activeBonus.provider}</div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-8 text-right">
+            <div>
+              <div className="text-base text-amber-200/70 uppercase font-black tracking-wider">Цена</div>
+              <div className="text-2xl font-bold text-amber-100">{formatCurrency(activeBonus.buy_amount)}</div>
             </div>
 
-            {/* Правая часть */}
-            <div className="flex items-center gap-6 text-right shrink-0">
-              <div className="w-28 text-right">
-                <div style={{ color: 'var(--widget-text-primary)' }} className="text-3xl font-semibold">
-                  {formatCurrency(activeBonus.buy_amount ?? activeBonus.buy_cost ?? 0)}
-                </div>
-              </div>
+            <div className="w-44">
+              <div className="text-base text-amber-200/70 uppercase font-black tracking-wider">Выигрыш</div>
+              <div className="text-2xl font-black text-amber-300 animate-pulse">Крутим...</div>
+            </div>
 
-              <div className="w-40 text-center">
-                <div
-                  style={{ color: 'var(--widget-accent)' }}
-                  className="text-xl font-bold uppercase tracking-wider"
-                >
-                  Открываем
-                </div>
-              </div>
-
-              <div className="w-32 text-right">
-                <span
-                  style={{
-                    backgroundColor: 'rgba(255, 34, 34, 0.08)',
-                    borderColor: 'rgba(255, 34, 34, 0.4)',
-                    color: '#FFFFFF',
-                  }}
-                  className="inline-flex items-center justify-center gap-3 w-full text-2xl font-extrabold px-3.5 py-2 rounded-xl border"
-                >
-                  <span className="smooth-live-dot ml-[-2px] inline-block h-3 w-3 rounded-full bg-[#FF2222] shrink-0" />
-                  <span className="tracking-wider">LIVE</span>
-                </span>
-              </div>
+            <div className="w-32 text-right">
+              <span className="inline-block text-lg font-black px-4 py-2 rounded-xl border bg-amber-400/20 border-amber-400 text-amber-300">
+                🎰 LIVE
+              </span>
             </div>
           </div>
         </div>
       )}
 
-      {/* Список прокрутки (ТЕНИ И СВЕЧЕНИЯ УБРАНЫ) */}
-      <div
-        ref={containerRef}
-        className="overflow-hidden flex-1 relative no-scrollbar scroll-mask-top z-0"
-      >
-        <div
-          ref={contentRef}
-          style={{
-            willChange: 'transform',
-            transformStyle: 'preserve-3d'
-          }}
-          className="gpu-no-flicker flex flex-col gap-3 pr-1 pt-1"
-        >
+      {/* Обычный список со скроллом */}
+      <div ref={containerRef} className="overflow-hidden flex-1 relative no-scrollbar">
+        <div ref={contentRef} className="flex flex-col gap-3 pr-1">
           {displayBonuses.map((item, idx) => {
-            const cost = item.buy_amount ?? item.buy_cost ?? 0;
-            const mult = item.multiplier || 0;
-            const win = item.win_amount ?? cost * mult;
-
-            const isProfit = mult >= 1.0;
-            const isPending = item.status === 'pending' && mult === 0 && !item.win_amount;
+            const isPending = item.status === 'pending';
+            const isProfit = (item.multiplier || 0) >= 1.0;
 
             return (
               <div
                 key={`${item.id}-${idx}`}
-                style={{
-                  backgroundColor: 'var(--widget-surface)',
-                  borderColor: 'rgba(255, 255, 255, 0.08)',
-                }}
-                className="gpu-no-flicker border rounded-2xl px-6 py-3.5 flex items-center justify-between shrink-0"
+                className="bg-[#18080b]/95 border border-red-800/40 rounded-2xl px-6 py-3.5 flex items-center justify-between shadow-[0_6px_20px_rgba(0,0,0,0.6)] backdrop-blur-md"
               >
-                {/* Название слота и номер */}
-                <div className="flex items-center gap-5 min-w-0 flex-1 pr-4">
-                  <span
-                    style={{
-                      color: 'var(--widget-text-secondary)',
-                      backgroundColor: 'var(--widget-surface-secondary)',
-                      borderColor: 'rgba(255, 255, 255, 0.08)',
-                    }}
-                    className="text-xl font-medium px-4 py-2 rounded-xl border shrink-0"
-                  >
-                    #{String(item.displayIndex).padStart(2, '0')}
+                <div className="flex items-center gap-5">
+                  <span className="text-xl font-black text-red-300 bg-red-950/80 px-4 py-2 rounded-xl border border-red-700/40">
+                    #{String(item.position).padStart(2, '0')}
                   </span>
-                  <div className="min-w-0 max-w-[420px]">
-                    <div style={{ color: 'var(--widget-text-primary)' }} className="text-4xl font-medium tracking-wide truncate">
-                      {item.slot_name}
-                    </div>
-                    <div style={{ color: 'var(--widget-text-secondary)' }} className="text-3xl font-normal mt-0.5 truncate">
-                      {item.provider || item.player_name || 'Игрок не указан'}
-                    </div>
+                  <div>
+                    <div className="text-2xl font-black text-white tracking-wide">{item.slot_name}</div>
+                    <div className="text-xl font-black text-red-300/90 mt-0.5">{item.provider}</div>
                   </div>
                 </div>
 
-                {/* Финансовые значения */}
-                <div className="flex items-center gap-6 text-right shrink-0">
-                  {/* Первоначальная стоимость */}
-                  <div className="w-24 text-right">
-                    <div style={{ color: 'var(--widget-text-secondary)' }} className="text-3xl font-medium">
-                      {formatCurrency(cost)}
+                <div className="flex items-center gap-8 text-right">
+                  <div>
+                    <div className="text-base text-red-300/60 uppercase font-black tracking-wider">Цена</div>
+                    <div className="text-xl font-bold text-red-200">{formatCurrency(item.buy_amount)}</div>
+                  </div>
+
+                  <div className="w-44">
+                    <div className="text-base text-red-300/60 uppercase font-black tracking-wider">Выигрыш</div>
+                    <div className={`text-2xl font-black ${isPending ? 'text-gray-500' : isProfit ? 'text-emerald-400' : 'text-red-300'}`}>
+                      {isPending ? '—' : formatCurrency(item.win_amount)}
                     </div>
                   </div>
 
-                  {/* Основная цветная сумма */}
-                  <div className="w-32 text-right">
-                    <div
-                      style={{
-                        color: isProfit
-                          ? 'var(--widget-positive, #10b981)'
-                          : isPending
-                            ? 'var(--widget-text-muted)'
-                            : 'var(--widget-danger, #ef4444)',
-                      }}
-                      className="text-4xl font-medium"
-                    >
-                      {isPending ? '—' : formatCurrency(win)}
-                    </div>
-                  </div>
-
-                  {/* Коэффициент x */}
-                  <div className="w-32 text-right">
-                    <span
-                      style={{
-                        backgroundColor: isProfit
-                          ? 'rgba(36, 214, 160, 0.08)'
-                          : isPending
-                            ? 'rgba(255, 255, 255, 0.03)'
-                            : 'rgba(239, 68, 68, 0.08)',
-                        borderColor: isProfit
-                          ? 'rgba(16, 185, 129, 0.3)'
-                          : isPending
-                            ? 'rgba(255, 255, 255, 0.1)'
-                            : 'rgba(239, 68, 68, 0.3)',
-                        color: isProfit
-                          ? 'var(--widget-positive, #10b981)'
-                          : isPending
-                            ? 'var(--widget-text-muted)'
-                            : 'var(--widget-danger, #ef4444)',
-                      }}
-                      className="inline-block w-full text-center text-3xl font-bold px-4 py-2 rounded-xl border transition-all"
-                    >
-                      {formatMultiplier(mult)}
+                  <div className="w-36 text-right">
+                    <span className={`inline-block text-3xl font-black px-5 py-2 rounded-xl border ${
+                      isPending
+                        ? 'bg-gray-900/40 border-gray-700 text-gray-500'
+                        : isProfit
+                        ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300 shadow-[0_0_20px_rgba(16,185,129,0.3)]'
+                        : 'bg-red-950/60 border-red-700/40 text-red-200'
+                    }`}>
+                      {formatMultiplier(item.multiplier)}
                     </span>
                   </div>
                 </div>

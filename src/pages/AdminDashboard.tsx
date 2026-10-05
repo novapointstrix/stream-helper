@@ -1,461 +1,243 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
-import { Stream, BonusBuy } from '../types/database.types';
-import { ThemeId, WidgetThemeTokens } from '../types/theme';
-import {
-  getStreamById,
-  getBonusesByStreamId,
-  updateStream,
-} from '../services/bonusService';
-import { supabase } from '../lib/supabaseClient';
+import React, { useEffect, useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { BonusBuy, Stream } from '../types/database.types';
+import { getBonusesByStreamId, deleteBonusBuy, saveBonusBuy, getStreams, getStreamById, updateStream, setActiveBonus } from '../services/bonusService';
 import { QuickAddBonusForm } from '../components/admin/QuickAddBonusForm';
-import { BonusList } from '../components/admin/BonusList';
-import { WidgetStyleSelector } from '../components/admin/WidgetStyleSelector';
-import { Edit2, Check, Copy, ExternalLink, ArrowLeft, Palette, LogOut, Plus } from 'lucide-react';
+import { calculateMetrics, formatCurrency, formatMultiplier } from '../lib/utils';
+import { Copy, Trash2, Check, Edit3, Save, Play, Square } from 'lucide-react';
 
 export const AdminDashboard: React.FC = () => {
-  const { id: paramId } = useParams<{ id: string }>();
+  const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
-  const [stream, setStream] = useState<Stream | null>(null);
-  const [activeStreamId, setActiveStreamId] = useState<string | null>(paramId || null);
+  const [streams, setStreams] = useState<Stream[]>([]);
+  const [currentStream, setCurrentStream] = useState<Stream | null>(null);
   const [bonuses, setBonuses] = useState<BonusBuy[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  const [isEditingTitle, setIsEditingTitle] = useState(false);
-  const [titleInput, setTitleInput] = useState('');
-
-  const [isEditingBalance, setIsEditingBalance] = useState(false);
-  const [startBalanceInput, setStartBalanceInput] = useState<number>(0);
-
-  const [widgetStyle, setWidgetStyle] = useState<ThemeId>('classic');
-  const [customTokens, setCustomTokens] = useState<Partial<WidgetThemeTokens> | undefined>();
-  const [showStyleSelector, setShowStyleSelector] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const fetchOrCreateActiveStream = async (): Promise<string | null> => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return null;
+  const [isEditing, setIsEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState('');
+  const [editNumber, setEditNumber] = useState<number>(0);
 
-      const { data: latestStream, error } = await supabase
-        .from('streams')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+  const loadData = async () => {
+    const allStreams = await getStreams();
+    setStreams(allStreams);
 
-      if (error && error.code !== 'PGRST116') {
-        console.error('Ошибка запроса активного стрима:', error);
-      }
+    const activeStreamId = id || (allStreams[0] ? allStreams[0].id : 'demo-127');
+    const stream = await getStreamById(activeStreamId);
 
-      if (latestStream) {
-        return latestStream.id;
-      }
-
-      const { data: newStream, error: createError } = await supabase
-        .from('streams')
-        .insert([{ title: 'Новый Bonus Buy', stream_number: 1, user_id: user.id, start_balance: 0 }])
-        .select()
-        .single();
-
-      if (createError) throw createError;
-      return newStream ? newStream.id : null;
-    } catch (err) {
-      console.error('Ошибка при поиске/создании сессии:', err);
-      return null;
+    if (stream) {
+      setCurrentStream(stream);
+      setEditTitle(stream.title);
+      setEditNumber(stream.stream_number);
+      const data = await getBonusesByStreamId(stream.id);
+      setBonuses(data);
     }
   };
-
-  const loadData = useCallback(async () => {
-    try {
-      let targetId = paramId || activeStreamId;
-
-      if (!targetId) {
-        targetId = await fetchOrCreateActiveStream();
-        if (targetId) setActiveStreamId(targetId);
-      }
-
-      if (!targetId) {
-        setStream(null);
-        setLoading(false);
-        return;
-      }
-
-      const fetchedStream = await getStreamById(targetId);
-
-      if (!fetchedStream) {
-        setStream(null);
-        setLoading(false);
-        return;
-      }
-
-      setStream(fetchedStream);
-      setTitleInput(fetchedStream.title);
-      setStartBalanceInput(fetchedStream.start_balance || 0);
-
-      if (fetchedStream.widget_style) {
-        setWidgetStyle(fetchedStream.widget_style as ThemeId);
-      }
-      if (fetchedStream.custom_tokens) {
-        setCustomTokens(fetchedStream.custom_tokens as Partial<WidgetThemeTokens>);
-      }
-
-      const fetchedBonuses = await getBonusesByStreamId(targetId);
-      setBonuses(fetchedBonuses || []);
-    } catch (err) {
-      console.error('Ошибка при загрузке дашборда:', err);
-    } finally {
-      setLoading(false);
-    }
-  }, [paramId, activeStreamId]);
 
   useEffect(() => {
     loadData();
-  }, [loadData]);
+  }, [id]);
 
-  useEffect(() => {
-    const targetId = paramId || activeStreamId;
-    if (!targetId) return;
-
-    const channel = supabase
-      .channel(`admin_bonuses_realtime_${targetId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'bonus_buys',
-          filter: `stream_id=eq.${targetId}`,
-        },
-        () => {
-          getBonusesByStreamId(targetId).then((data) => {
-            if (data) setBonuses(data);
-          });
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [paramId, activeStreamId]);
-
-  const handleCreateNewStream = async (e?: React.MouseEvent) => {
-    if (e) e.preventDefault();
-    try {
-      setLoading(true);
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      const nextNumber = stream ? (stream.stream_number || 0) + 1 : 1;
-      const { data: newStream, error } = await supabase
-        .from('streams')
-        .insert([{ title: `Bonus Buy #${nextNumber}`, stream_number: nextNumber, user_id: user.id, start_balance: 0 }])
-        .select()
-        .single();
-
-      if (error) throw error;
-      if (newStream) {
-        setActiveStreamId(newStream.id);
-        setTimeout(() => {
-          navigate(`/dashboard/${newStream.id}`);
-        }, 0);
-      }
-    } catch (err) {
-      console.error('Ошибка создания новой сессии:', err);
-    } finally {
-      setLoading(false);
+  const handleSaveStreamInfo = async () => {
+    if (!currentStream) return;
+    const updated = await updateStream(currentStream.id, {
+      title: editTitle,
+      stream_number: Number(editNumber) || 0,
+    });
+    if (updated) {
+      setCurrentStream(updated);
+      setIsEditing(false);
+      loadData();
     }
   };
 
-  const handleSaveTitle = async () => {
-    const currentId = activeStreamId || paramId;
-    if (!currentId || !titleInput.trim()) return;
-    try {
-      await updateStream(currentId, { title: titleInput.trim() });
-      setStream((prev) => (prev ? { ...prev, title: titleInput.trim() } : null));
-      setIsEditingTitle(false);
-    } catch (err) {
-      console.error('Ошибка сохранения названия:', err);
-    }
+  const handleStartPlaying = async (bonusId: string) => {
+    if (!currentStream) return;
+    await setActiveBonus(currentStream.id, bonusId);
+    loadData();
   };
 
-  const handleSaveStartBalance = async () => {
-    const currentId = activeStreamId || paramId;
-    if (!currentId) return;
-    try {
-      await updateStream(currentId, { start_balance: startBalanceInput });
-      setStream((prev) => (prev ? { ...prev, start_balance: startBalanceInput } : null));
-      setIsEditingBalance(false);
-    } catch (err) {
-      console.error('Ошибка сохранения начального баланса:', err);
-    }
+  const handleStopPlaying = async () => {
+    if (!currentStream) return;
+    await setActiveBonus(currentStream.id, null);
+    loadData();
   };
 
-  const handleStyleChange = (newStyle: ThemeId) => {
-    setWidgetStyle(newStyle);
-  };
+  const metrics = calculateMetrics(bonuses);
 
-  const handleCustomTokensChange = (newTokens: Partial<WidgetThemeTokens> | undefined) => {
-    setCustomTokens(newTokens);
-  };
-
-  const handleSaveStyle = async () => {
-    const currentId = activeStreamId || paramId;
-    if (!currentId) return;
-    try {
-      await updateStream(currentId, {
-        widget_style: widgetStyle,
-        custom_tokens: customTokens,
-      });
-      await loadData();
-    } catch (err) {
-      console.error('Ошибка сохранения стиля:', err);
-    }
-  };
-
-  const handleLogout = async () => {
-    try {
-      await supabase.auth.signOut();
-      window.location.href = '/login';
-    } catch (err) {
-      console.error('Ошибка выхода:', err);
-    }
-  };
-
-  const currentStreamId = activeStreamId || paramId;
-
-  const copyOverlayLink = () => {
-    if (!currentStreamId) return;
-    const overlayUrl = `${window.location.origin}/overlay/${currentStreamId}`;
-    navigator.clipboard.writeText(overlayUrl);
+  const copyObsUrl = () => {
+    if (!currentStream) return;
+    const url = `${window.location.origin}/overlay/${currentStream.id}`;
+    navigator.clipboard.writeText(url);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const startBalance = Number(stream?.start_balance || 0);
-  const totalSpent = bonuses.reduce((acc, b) => acc + (Number(b.buy_cost ?? b.buy_amount) || 0), 0);
-  const totalWon = bonuses.reduce((acc, b) => acc + (Number(b.win_amount) || 0), 0);
-  const profit = totalWon - totalSpent;
-  const currentBalance = startBalance + profit;
-
-  const avgX =
-    bonuses.length > 0
-      ? (bonuses.reduce((acc, b) => acc + (Number(b.multiplier) || 0), 0) / bonuses.length).toFixed(1)
-      : '0';
-
-  const formattedBonuses = bonuses.map((b) => ({
-    ...b,
-    widget_style: b.widget_style || widgetStyle,
-    custom_tokens: b.custom_tokens || customTokens,
-  }));
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-[#09090B] flex items-center justify-center text-[#E4E4E7]">
-        <div className="text-center space-y-3">
-          <div className="w-6 h-6 border-2 border-[#27272A] border-t-amber-500 rounded-full animate-spin mx-auto" />
-          <p className="text-xs text-[#A1A1AA] font-mono">Загрузка данных панели...</p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!stream || !currentStreamId) {
-    return (
-      <div className="min-h-screen bg-[#09090B] flex flex-col items-center justify-center text-[#E4E4E7] p-4">
-        <div className="bg-[#121215] border border-[#27272A] p-8 rounded-2xl max-w-md w-full text-center space-y-4">
-          <h2 className="text-base font-semibold text-white">Нет активных сессий Bonus Buy</h2>
-          <p className="text-[#A1A1AA] text-xs">
-            Создайте первую сессию для отслеживания покупок бонусов и вывода оверлея на стрим.
-          </p>
-          <button
-            type="button"
-            onClick={handleCreateNewStream}
-            className="w-full bg-amber-500 hover:bg-amber-600 text-black font-extrabold py-2.5 rounded-xl text-xs uppercase tracking-wider transition flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 cursor-pointer"
-          >
-            <Plus size={16} /> Создать новую сессию
-          </button>
-        </div>
-      </div>
-    );
-  }
+  const handleInlineWinChange = async (bonus: BonusBuy, winVal: string) => {
+    const win = winVal !== '' ? Number(winVal) : null;
+    await saveBonusBuy({ ...bonus, win_amount: win });
+    if (currentStream) {
+      const data = await getBonusesByStreamId(currentStream.id);
+      setBonuses(data);
+    }
+  };
 
   return (
-    <div className="min-h-screen w-full bg-[#09090B] text-[#E4E4E7] font-sans relative">
-      <div className="max-w-7xl mx-auto p-4 sm:p-6 space-y-5 pb-24">
-
-        <div className="flex flex-wrap items-center justify-between gap-3 bg-[#121215] border border-[#27272A] rounded-2xl p-4 shadow-xl">
-          <div className="flex items-center gap-3">
-            <button
-              type="button"
-              onClick={() => setTimeout(() => navigate('/'), 0)}
-              className="p-2 bg-[#18181B] border border-[#27272A] rounded-xl text-[#A1A1AA] hover:text-white transition cursor-pointer"
-              title="На главную"
-            >
-              <ArrowLeft size={16} />
-            </button>
-
-            {isEditingTitle ? (
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  value={titleInput}
-                  onChange={(e) => setTitleInput(e.target.value)}
-                  className="bg-[#09090B] border border-[#3F3F46] rounded-xl px-3 py-1 text-xs text-white focus:outline-none"
-                />
-                <button
-                  type="button"
-                  onClick={handleSaveTitle}
-                  className="p-1.5 bg-[#27272A] border border-[#3F3F46] text-white rounded-xl hover:bg-[#3F3F46] cursor-pointer"
-                >
-                  <Check size={14} />
-                </button>
-              </div>
-            ) : (
-              <div className="flex items-center gap-2.5">
-                <h1 className="text-base font-medium text-white">{stream.title}</h1>
-                <span className="text-[10px] font-mono px-2 py-0.5 bg-[#18181B] text-[#A1A1AA] border border-[#27272A] rounded-md">
-                  #{stream.stream_number}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setIsEditingTitle(true)}
-                  className="text-[#71717A] hover:text-[#A1A1AA] p-1 transition cursor-pointer"
-                >
-                  <Edit2 size={13} />
-                </button>
-              </div>
-            )}
-          </div>
-
-          <div className="flex items-center gap-2 flex-wrap">
-            <button
-              type="button"
-              onClick={handleCreateNewStream}
-              className="bg-amber-500 hover:bg-amber-600 text-black font-extrabold text-xs px-3 py-1.5 rounded-xl flex items-center gap-1.5 transition shadow-md shadow-amber-500/10 cursor-pointer"
-            >
-              <Plus size={14} /> Новая сессия
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setShowStyleSelector(!showStyleSelector)}
-              className={`text-xs font-medium px-3 py-1.5 rounded-xl flex items-center gap-1.5 border transition cursor-pointer ${showStyleSelector
-                ? 'bg-[#27272A] border-[#3F3F46] text-white'
-                : 'bg-[#18181B] border-[#27272A] text-[#A1A1AA] hover:text-white'
-                }`}
-            >
-              <Palette size={13} />
-              Стиль виджета
-            </button>
-
-            <button
-              type="button"
-              onClick={copyOverlayLink}
-              className="bg-[#18181B] hover:bg-[#27272A] border border-[#27272A] text-[#E4E4E7] text-xs font-medium px-3 py-1.5 rounded-xl flex items-center gap-1.5 transition cursor-pointer"
-            >
-              {copied ? <Check size={13} className="text-emerald-400" /> : <Copy size={13} />}
-              {copied ? 'Скопировано' : 'OBS ссылка'}
-            </button>
-
-            <Link
-              to={`/overlay/${currentStreamId}`}
-              target="_blank"
-              className="bg-[#27272A] hover:bg-[#3F3F46] border border-[#3F3F46] text-white text-xs font-medium px-3 py-1.5 rounded-xl flex items-center gap-1.5 transition"
-            >
-              <ExternalLink size={13} /> Оверлей
-            </Link>
-
-            <button
-              type="button"
-              onClick={handleLogout}
-              className="bg-[#18181B] hover:bg-[#27272A] border border-[#27272A] text-[#71717A] hover:text-white p-2 rounded-xl transition cursor-pointer"
-              title="Выход"
-            >
-              <LogOut size={14} />
-            </button>
-          </div>
+    <div className="p-8 max-w-7xl mx-auto space-y-6 text-white">
+      <div className="flex items-center justify-between bg-[#120507]/90 border border-red-900/40 p-4 rounded-2xl">
+        <div className="flex items-center gap-3">
+          <span className="text-xs text-red-300/60 font-semibold">Выберите стрим:</span>
+          <select
+            value={currentStream?.id || ''}
+            onChange={(e) => navigate(`/admin/streams/${e.target.value}`)}
+            className="bg-[#080203] border border-red-800/40 rounded-xl px-4 py-2 text-sm text-white font-bold focus:outline-none focus:border-red-500 cursor-pointer"
+          >
+            {streams.map((s) => (
+              <option key={s.id} value={s.id}>
+                BONUS BUY #{s.stream_number} — {s.title}
+              </option>
+            ))}
+          </select>
         </div>
+      </div>
 
-        {showStyleSelector && (
-          <div className="bg-[#121215] border border-[#27272A] rounded-2xl p-4 shadow-xl">
-            <WidgetStyleSelector
-              selectedStyle={widgetStyle}
-              customTokens={customTokens}
-              onChangeStyle={handleStyleChange}
-              onChangeCustomTokens={handleCustomTokensChange}
-              onSave={handleSaveStyle}
-              onClose={() => setShowStyleSelector(false)}
-              previewBonuses={formattedBonuses}
-            />
-          </div>
-        )}
-
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-          <div className="bg-[#121215] border border-[#27272A] p-3.5 rounded-2xl">
-            <div className="flex items-center justify-between text-[10px] text-[#71717A] font-mono uppercase tracking-wider">
-              <span>Старт Баланс</span>
-              <button onClick={() => setIsEditingBalance(true)} className="hover:text-white transition cursor-pointer">
-                <Edit2 size={10} />
-              </button>
-            </div>
-            {isEditingBalance ? (
-              <div className="flex items-center gap-1 mt-0.5">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 bg-[#120507]/80 border border-red-900/40 p-6 rounded-3xl backdrop-blur-xl">
+        <div className="flex-1">
+          {isEditing ? (
+            <div className="flex flex-wrap items-center gap-3 mt-1">
+              <div>
+                <label className="text-[10px] text-red-300/60 block">Номер</label>
                 <input
                   type="number"
-                  value={startBalanceInput}
-                  onChange={(e) => setStartBalanceInput(Number(e.target.value))}
-                  className="w-full bg-[#09090B] border border-[#3F3F46] rounded-md px-1.5 py-0.5 text-xs text-white"
+                  value={editNumber}
+                  onChange={(e) => setEditNumber(Number(e.target.value))}
+                  className="w-24 bg-[#080203] border border-red-800/40 rounded-xl px-3 py-1 text-sm font-bold text-red-400"
                 />
-                <button onClick={handleSaveStartBalance} className="p-1 bg-[#27272A] text-white rounded-md">
-                  <Check size={12} />
+              </div>
+              <div className="flex-1 min-w-[200px]">
+                <label className="text-[10px] text-red-300/60 block">Название стрима</label>
+                <input
+                  type="text"
+                  value={editTitle}
+                  onChange={(e) => setEditTitle(e.target.value)}
+                  className="w-full bg-[#080203] border border-red-800/40 rounded-xl px-3 py-1 text-sm font-bold text-white"
+                />
+              </div>
+              <button
+                onClick={handleSaveStreamInfo}
+                className="mt-4 bg-emerald-600 hover:bg-emerald-500 text-white font-bold px-4 py-1.5 rounded-xl text-xs flex items-center gap-1 cursor-pointer"
+              >
+                <Save size={14} /> Сохранить
+              </button>
+            </div>
+          ) : (
+            <div>
+              <div className="flex items-center gap-3">
+                <span className="text-xs font-bold text-red-400 bg-red-950/60 px-3 py-1 rounded-full border border-red-800/40">
+                  🍔 BONUS BUY #{currentStream?.stream_number}
+                </span>
+                <button
+                  onClick={() => setIsEditing(true)}
+                  className="text-red-400/60 hover:text-red-300 text-xs flex items-center gap-1 font-medium transition"
+                >
+                  <Edit3 size={14} /> Редактировать
                 </button>
               </div>
-            ) : (
-              <div className="text-lg font-semibold text-white mt-0.5">${startBalance.toLocaleString()}</div>
-            )}
-          </div>
-
-          <div className="bg-[#121215] border border-[#27272A] p-3.5 rounded-2xl">
-            <div className="text-[10px] text-[#71717A] font-mono uppercase tracking-wider">Текущий Баланс</div>
-            <div className={`text-lg font-semibold mt-0.5 ${currentBalance >= startBalance ? 'text-emerald-400' : 'text-rose-400'}`}>
-              ${currentBalance.toLocaleString()}
+              <h1 className="text-2xl font-black mt-2 text-white">{currentStream?.title}</h1>
             </div>
-          </div>
-
-          <div className="bg-[#121215] border border-[#27272A] p-3.5 rounded-2xl">
-            <div className="text-[10px] text-[#71717A] font-mono uppercase tracking-wider">Затрачено</div>
-            <div className="text-lg font-semibold text-[#E4E4E7] mt-0.5">${totalSpent.toLocaleString()}</div>
-          </div>
-
-          <div className="bg-[#121215] border border-[#27272A] p-3.5 rounded-2xl">
-            <div className="text-[10px] text-[#71717A] font-mono uppercase tracking-wider">Профит</div>
-            <div className={`text-lg font-semibold mt-0.5 ${profit >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-              ${profit.toLocaleString()}
-            </div>
-          </div>
-
-          <div className="bg-[#121215] border border-[#27272A] p-3.5 rounded-2xl">
-            <div className="text-[10px] text-[#71717A] font-mono uppercase tracking-wider">Средний X</div>
-            <div className="text-lg font-semibold text-white mt-0.5">{avgX}x</div>
-          </div>
+          )}
         </div>
 
-        <div className="bg-[#121215] border border-[#27272A] rounded-2xl p-4">
-          <QuickAddBonusForm
-            streamId={currentStreamId}
-            onBonusAdded={loadData}
-            onAdded={loadData}
-          />
-        </div>
+        <button
+          onClick={copyObsUrl}
+          className="bg-red-950/60 hover:bg-red-900/80 border border-red-800/40 text-red-200 text-xs font-semibold px-4 py-2.5 rounded-xl transition flex items-center gap-2 cursor-pointer shadow-[0_0_15px_rgba(220,38,38,0.15)]"
+        >
+          {copied ? <Check size={16} className="text-emerald-400" /> : <Copy size={16} />}
+          {copied ? 'Скопировано!' : 'CКОПИРОВАТЬ OBS ССЫЛКУ'}
+        </button>
+      </div>
 
-        <div className="bg-[#121215] border border-[#27272A] rounded-2xl p-4">
-          <BonusList bonuses={formattedBonuses} onBonusUpdated={loadData} />
-        </div>
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+        {[
+          { label: 'Всего куплено', val: metrics.totalBuys, icon: '📦' },
+          { label: 'Затрачено', val: formatCurrency(metrics.totalSpent), icon: '💸' },
+          { label: 'Выигрыш', val: formatCurrency(metrics.totalWin), icon: '💰' },
+          { label: 'Профит', val: formatCurrency(metrics.profit), color: metrics.profit >= 0 ? 'text-emerald-400' : 'text-rose-400', icon: '📈' },
+          { label: 'Средний X', val: formatMultiplier(metrics.avgMultiplier), icon: '⚡' },
+          { label: 'ЛУЧШИЙ X', val: metrics.bestX ? formatMultiplier(metrics.bestX.multiplier) : '—', icon: '👑' },
+        ].map((item, idx) => (
+          <div key={idx} className="bg-[#120507]/60 border border-red-900/30 rounded-2xl p-3 text-center relative overflow-hidden">
+            <div className="text-xs mb-1">{item.icon}</div>
+            <div className="text-[10px] font-bold text-red-300/50 uppercase tracking-wider">{item.label}</div>
+            <div className={`text-sm font-black mt-1 ${item.color || 'text-white'}`}>{item.val}</div>
+          </div>
+        ))}
+      </div>
 
+      {currentStream && <QuickAddBonusForm streamId={currentStream.id} onAdded={loadData} />}
+
+      <div className="bg-[#120507]/80 border border-red-900/40 rounded-3xl p-6 overflow-x-auto">
+        <table className="w-full text-left text-sm border-collapse">
+          <thead>
+            <tr className="border-b border-red-900/30 text-red-300/50 text-xs font-bold uppercase">
+              <th className="py-3 px-2">#</th>
+              <th className="py-3 px-2">Фаза игры</th>
+              <th className="py-3 px-2">Слот</th>
+              <th className="py-3 px-2">Игрок (Ник)</th>
+              <th className="py-3 px-2">Цена</th>
+              <th className="py-3 px-2">Выигрыш</th>
+              <th className="py-3 px-2">X</th>
+              <th className="py-3 px-2 text-right">Удалить</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-red-950/40">
+            {bonuses.map((b) => {
+              const isPlaying = b.status === 'playing' || currentStream?.active_bonus_id === b.id;
+
+              return (
+                <tr key={b.id} className={isPlaying ? 'bg-amber-500/10' : ''}>
+                  <td className="py-3 px-2 font-bold text-red-400">#{b.position}</td>
+                  <td className="py-3 px-2">
+                    {isPlaying ? (
+                      <button
+                        onClick={handleStopPlaying}
+                        className="bg-amber-500/20 border border-amber-500/50 text-amber-300 text-xs font-bold px-3 py-1 rounded-lg flex items-center gap-1 cursor-pointer animate-pulse"
+                      >
+                        <Square size={12} className="fill-amber-300" /> Снять выбор
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleStartPlaying(b.id)}
+                        className="bg-red-950/60 hover:bg-red-800 border border-red-800/40 text-red-300 text-xs font-semibold px-3 py-1 rounded-lg flex items-center gap-1 cursor-pointer transition"
+                      >
+                        <Play size={12} className="fill-red-300" /> Начать бонус бай
+                      </button>
+                    )}
+                  </td>
+                  <td className="py-3 px-2 font-semibold text-white">{b.slot_name}</td>
+                  <td className="py-3 px-2 text-red-300/90 font-bold">{b.provider}</td>
+                  <td className="py-3 px-2 font-medium">{formatCurrency(b.buy_amount)}</td>
+                  <td className="py-3 px-2">
+                    <input
+                      type="number"
+                      defaultValue={b.win_amount !== null ? b.win_amount : ''}
+                      placeholder="—"
+                      onBlur={(e) => handleInlineWinChange(b, e.target.value)}
+                      className="w-28 bg-[#080203] border border-red-800/40 rounded-lg px-2 py-1 text-sm text-white"
+                    />
+                  </td>
+                  <td className="py-3 px-2 font-bold text-red-300">{formatMultiplier(b.multiplier)}</td>
+                  <td className="py-3 px-2 text-right">
+                    <button onClick={async () => { if (currentStream) { await deleteBonusBuy(b.id, currentStream.id); loadData(); } }} className="text-red-400/50 hover:text-rose-400">
+                      <Trash2 size={16} />
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
     </div>
   );
